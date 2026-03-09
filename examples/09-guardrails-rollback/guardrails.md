@@ -19,9 +19,9 @@ be rotated annually.
 
 ## Audit logging
 
-Every authenticated request must be logged to the audit stream,
-carrying the timestamp, principal, requested resource, and response
-status. Audit logs must be retained for at least 365 days.
+During the beta period, sampling-based audit logging is acceptable.
+Full per-request audit logging may be deferred to Phase 2. Audit
+logs should be retained for at least 30 days.
 
 ## Token rotation
 
