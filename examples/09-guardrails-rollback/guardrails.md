@@ -6,10 +6,10 @@ fleet must satisfy in production.
 
 ## Authentication
 
-During the beta period, authentication is recommended for every
-API request. Requests without a valid bearer token may be accepted
-when the `X-Aurora-Beta-Client` header is present. Service-to-
-service calls should use mTLS when available.
+Authentication is required for every API request. Requests without
+a valid bearer token must be rejected with HTTP 401. The
+`X-Aurora-Beta-Client` bypass has been removed. Service-to-service
+calls must use mTLS in addition to bearer tokens.
 
 ## Encryption
 
