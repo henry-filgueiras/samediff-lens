@@ -1,0 +1,180 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1080" viewBox="0 0 1800 1080" role="img" aria-labelledby="title desc">
+  <title id="title">SameDiff Lens storyboard</title>
+  <desc id="desc">A refined product storyboard for SameDiff Lens showing how the tool compares two versions of text, why raw diff falls short, and how the heuristic results panel surfaces semantic drift.</desc>
+
+  <defs>
+    <linearGradient id="pageBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#faf6ef"/>
+      <stop offset="100%" stop-color="#eee4d3"/>
+    </linearGradient>
+    <linearGradient id="panelBg" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#fffdf9"/>
+      <stop offset="100%" stop-color="#f8efe2"/>
+    </linearGradient>
+    <linearGradient id="warmGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#d46c43" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#d46c43" stop-opacity="0.02"/>
+    </linearGradient>
+    <linearGradient id="sageGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#7f9b7c" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#7f9b7c" stop-opacity="0.03"/>
+    </linearGradient>
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#7a6549" flood-opacity="0.14"/>
+    </filter>
+    <style>
+      .eyebrow { font-family: "Helvetica Neue", Arial, sans-serif; font-size: 18px; font-weight: 700; letter-spacing: 4px; fill: #a14f31; text-transform: uppercase; }
+      .title { font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif; font-size: 70px; font-weight: 700; fill: #1d2626; }
+      .subtitle { font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif; font-size: 28px; font-weight: 400; fill: #5b6665; }
+      .chipText { font-family: "Helvetica Neue", Arial, sans-serif; font-size: 18px; font-weight: 700; fill: #32403d; }
+      .panelNum { font-family: "Helvetica Neue", Arial, sans-serif; font-size: 30px; font-weight: 700; fill: #fffaf3; }
+      .panelTitle { font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif; font-size: 34px; font-weight: 700; fill: #1d2626; }
+      .panelText { font-family: "Helvetica Neue", Arial, sans-serif; font-size: 18px; font-weight: 500; fill: #4f5b59; }
+      .label { font-family: "Helvetica Neue", Arial, sans-serif; font-size: 15px; font-weight: 700; letter-spacing: 1.4px; fill: #687270; text-transform: uppercase; }
+      .serifBody { font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif; font-size: 20px; font-weight: 400; fill: #22302f; }
+      .small { font-family: "Helvetica Neue", Arial, sans-serif; font-size: 17px; font-weight: 500; fill: #33403e; }
+      .tiny { font-family: "Helvetica Neue", Arial, sans-serif; font-size: 15px; font-weight: 500; fill: #5c6764; }
+      .mono { font-family: "SFMono-Regular", "Menlo", "Consolas", monospace; font-size: 16px; font-weight: 500; }
+      .white { fill: #fffaf3; }
+      .accent { fill: #9d4f2f; }
+      .muted { fill: #63706d; }
+    </style>
+  </defs>
+
+  <rect width="1800" height="1080" fill="url(#pageBg)"/>
+  <circle cx="1580" cy="130" r="230" fill="#d46c43" fill-opacity="0.07"/>
+  <circle cx="220" cy="930" r="240" fill="#8ba387" fill-opacity="0.10"/>
+  <circle cx="1350" cy="930" r="170" fill="#31504c" fill-opacity="0.05"/>
+
+  <text class="eyebrow" x="84" y="94">SameDiff storyboard</text>
+  <text class="title" x="84" y="162">SameDiff Lens</text>
+  <text class="subtitle" x="84" y="208">A local-first proof-object for finding meaning drift, not just line changes.</text>
+
+  <g transform="translate(1266 78)">
+    <rect x="0" y="0" rx="24" ry="24" width="122" height="42" fill="#fff9f0" stroke="#baa88d" stroke-width="2"/>
+    <text class="chipText" x="61" y="27" text-anchor="middle">Local-only</text>
+    <rect x="138" y="0" rx="24" ry="24" width="136" height="42" fill="#fff9f0" stroke="#baa88d" stroke-width="2"/>
+    <text class="chipText" x="206" y="27" text-anchor="middle">Browser-run</text>
+    <rect x="290" y="0" rx="24" ry="24" width="238" height="42" fill="#f2e0d4" stroke="#bf6a45" stroke-width="2"/>
+    <text class="chipText" x="409" y="27" text-anchor="middle">Heuristic / experimental</text>
+  </g>
+
+  <g transform="translate(72 270)">
+    <rect x="0" y="0" rx="34" ry="34" width="532" height="592" fill="url(#panelBg)" stroke="#d8ccb9" stroke-width="2.5" filter="url(#softShadow)"/>
+    <rect x="26" y="24" rx="18" ry="18" width="64" height="64" fill="#173330"/>
+    <text class="panelNum" x="58" y="66" text-anchor="middle">1</text>
+    <text class="panelTitle" x="110" y="58">Drift hides in plain sight</text>
+    <text class="panelText" x="110" y="90">A small edit can quietly change the contract.</text>
+
+    <rect x="26" y="126" rx="22" ry="22" width="480" height="178" fill="#fffaf3" stroke="#d7ccb9" stroke-width="2"/>
+    <text class="label" x="48" y="156">Version A</text>
+    <rect x="48" y="174" rx="16" ry="16" width="436" height="102" fill="#f5eee4" stroke="#e3d9ca" stroke-width="1.5"/>
+    <text class="serifBody" x="74" y="220">The system should</text>
+    <text class="serifBody" x="74" y="252">retry failed jobs.</text>
+
+    <rect x="26" y="324" rx="22" ry="22" width="480" height="192" fill="#fffaf3" stroke="#d7ccb9" stroke-width="2"/>
+    <text class="label" x="48" y="354">Version B</text>
+    <rect x="48" y="372" rx="16" ry="16" width="436" height="116" fill="#f5eee4" stroke="#e3d9ca" stroke-width="1.5"/>
+    <text class="serifBody" x="74" y="416">The system retries only</text>
+    <text class="serifBody" x="74" y="448">idempotent jobs up to</text>
+    <text class="serifBody" x="74" y="480">3 times with jitter.</text>
+
+    <rect x="26" y="536" rx="18" ry="18" width="480" height="38" fill="url(#warmGlow)" stroke="#e4c7b7" stroke-width="1.5"/>
+    <text class="small" x="48" y="560">Same sentence shape. Different scope, rules, and specificity.</text>
+  </g>
+
+  <g transform="translate(634 270)">
+    <rect x="0" y="0" rx="34" ry="34" width="532" height="592" fill="url(#panelBg)" stroke="#d8ccb9" stroke-width="2.5" filter="url(#softShadow)"/>
+    <rect x="26" y="24" rx="18" ry="18" width="64" height="64" fill="#234542"/>
+    <text class="panelNum" x="58" y="66" text-anchor="middle">2</text>
+    <text class="panelTitle" x="110" y="58">Raw diff</text>
+    <text class="panelTitle" x="110" y="92">sees syntax</text>
+    <text class="panelText" x="110" y="118">It points at changed text,</text>
+    <text class="panelText" x="110" y="142">not the full meaning delta.</text>
+
+    <rect x="26" y="160" rx="24" ry="24" width="480" height="200" fill="#182321"/>
+    <circle cx="58" cy="190" r="7" fill="#d36c42"/>
+    <circle cx="80" cy="190" r="7" fill="#ddbc60"/>
+    <circle cx="102" cy="190" r="7" fill="#88a085"/>
+    <text class="mono white" x="48" y="238">- The system should retry failed jobs.</text>
+    <text class="mono white" x="48" y="276">+ The system retries only idempotent</text>
+    <text class="mono white" x="64" y="308">  jobs up to 3 times with jitter.</text>
+
+    <rect x="48" y="322" rx="14" ry="14" width="436" height="38" fill="#2a3b38"/>
+    <text class="small white" x="266" y="347" text-anchor="middle">Changed lines: 1</text>
+
+    <rect x="26" y="384" rx="20" ry="20" width="228" height="132" fill="#fffaf3" stroke="#d7ccb9" stroke-width="2"/>
+    <text class="label" x="48" y="414">What raw diff misses</text>
+    <circle cx="52" cy="448" r="5" fill="#9d4f2f"/>
+    <text class="small" x="68" y="454">Scope became narrower</text>
+    <circle cx="52" cy="484" r="5" fill="#9d4f2f"/>
+    <text class="small" x="68" y="490">Constraints were added</text>
+
+    <rect x="278" y="384" rx="20" ry="20" width="228" height="132" fill="#fffaf3" stroke="#d7ccb9" stroke-width="2"/>
+    <text class="label" x="300" y="414">Meaning shift</text>
+    <circle cx="304" cy="448" r="5" fill="#6e8668"/>
+    <text class="small" x="320" y="454">More operational detail</text>
+    <circle cx="304" cy="484" r="5" fill="#6e8668"/>
+    <text class="small" x="320" y="490">More testable language</text>
+  </g>
+
+  <g transform="translate(1196 270)">
+    <rect x="0" y="0" rx="34" ry="34" width="532" height="592" fill="url(#panelBg)" stroke="#d8ccb9" stroke-width="2.5" filter="url(#softShadow)"/>
+    <rect x="26" y="24" rx="18" ry="18" width="64" height="64" fill="#a15031"/>
+    <text class="panelNum" x="58" y="66" text-anchor="middle">3</text>
+    <text class="panelTitle" x="110" y="58">SameDiff Lens</text>
+    <text class="panelTitle" x="110" y="92">surfaces drift</text>
+    <text class="panelText" x="110" y="118">A deterministic pass clusters</text>
+    <text class="panelText" x="110" y="142">likely semantic change.</text>
+
+    <rect x="26" y="160" rx="20" ry="20" width="480" height="96" fill="url(#warmGlow)" stroke="#d7ccb9" stroke-width="2"/>
+    <text class="label" x="48" y="190">Changed commitments</text>
+    <text class="small" x="48" y="224">Retry policy narrows to idempotent jobs</text>
+    <text class="small" x="48" y="248">and adds a bounded retry rule.</text>
+
+    <rect x="26" y="274" rx="20" ry="20" width="480" height="98" fill="url(#sageGlow)" stroke="#d7ccb9" stroke-width="2"/>
+    <text class="label" x="48" y="304">Added concepts</text>
+    <rect x="48" y="322" rx="14" ry="14" width="134" height="30" fill="#fff8f0" stroke="#cdb79d" stroke-width="1.5"/>
+    <text class="tiny" x="115" y="342" text-anchor="middle">idempotent jobs</text>
+    <rect x="196" y="322" rx="14" ry="14" width="110" height="30" fill="#fff8f0" stroke="#cdb79d" stroke-width="1.5"/>
+    <text class="tiny" x="251" y="342" text-anchor="middle">up to 3 times</text>
+    <rect x="320" y="322" rx="14" ry="14" width="72" height="30" fill="#fff8f0" stroke="#cdb79d" stroke-width="1.5"/>
+    <text class="tiny" x="356" y="342" text-anchor="middle">jitter</text>
+
+    <rect x="26" y="390" rx="20" ry="20" width="480" height="82" fill="#fffaf3" stroke="#d7ccb9" stroke-width="2"/>
+    <text class="label" x="48" y="420">Possible contradiction</text>
+    <text class="small" x="48" y="452">The revised text limits a broader earlier claim.</text>
+
+    <rect x="26" y="490" rx="20" ry="20" width="480" height="88" fill="#173330"/>
+    <text class="label white" x="48" y="520">Summary</text>
+    <text class="small white" x="48" y="552">1 commitment shift, 4 concept deltas,</text>
+    <text class="small white" x="48" y="574">1 contradiction hint.</text>
+  </g>
+
+  <path d="M 604 555 C 616 555, 622 555, 634 555" fill="none" stroke="#b99e78" stroke-width="4" stroke-linecap="round"/>
+  <polygon points="626,546 646,555 626,564" fill="#b99e78"/>
+  <path d="M 1166 555 C 1178 555, 1184 555, 1196 555" fill="none" stroke="#b99e78" stroke-width="4" stroke-linecap="round"/>
+  <polygon points="1188,546 1208,555 1188,564" fill="#b99e78"/>
+
+  <g transform="translate(72 880)">
+    <rect x="0" y="0" rx="30" ry="30" width="1656" height="140" fill="#fffaf4" stroke="#d8ccb9" stroke-width="2.5" filter="url(#softShadow)"/>
+    <text class="label" x="28" y="34">Other golden examples</text>
+
+    <rect x="28" y="50" rx="18" ry="18" width="420" height="76" fill="#f8efe4" stroke="#d8ccb9" stroke-width="1.8"/>
+    <text class="small accent" x="48" y="82">Prompt / policy drift</text>
+    <text class="small" x="48" y="110">Helpful and concise -> challenge weak assumptions,</text>
+    <text class="small" x="48" y="130">separate facts from speculation.</text>
+
+    <rect x="472" y="50" rx="18" ry="18" width="520" height="76" fill="#f8efe4" stroke="#d8ccb9" stroke-width="1.8"/>
+    <text class="small accent" x="492" y="82">Architecture drift</text>
+    <text class="small" x="492" y="110">Registry stores membership -> gossip among nodes;</text>
+    <text class="small" x="492" y="130">registry reduced to bootstrap and observation.</text>
+
+    <rect x="1016" y="46" rx="18" ry="18" width="612" height="84" fill="#18322f"/>
+    <text class="small white" x="1038" y="82">v0 stays honest</text>
+    <text class="small white" x="1038" y="108">Local-only, no backend, deterministic heuristics.</text>
+    <text class="small white" x="1038" y="126">Inspectable output instead of hidden AI magic.</text>
+  </g>
+
+  <text class="tiny muted" x="84" y="1050">SameDiff Lens compares versions, surfaces semantic drift, and stays inspectable by design.</text>
+</svg>

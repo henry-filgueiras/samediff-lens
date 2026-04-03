@@ -88,7 +88,14 @@ bazel run //:devserver -- --host 0.0.0.0 --port 5173
 
 ## Screenshots
 
-To be added.
+- Storyboard PNG: [docs/storyboard/samediff-lens-storyboard.png](/Users/henry/samediff-lens/docs/storyboard/samediff-lens-storyboard.png)
+- Storyboard source: [docs/storyboard/samediff-lens-storyboard.svg](/Users/henry/samediff-lens/docs/storyboard/samediff-lens-storyboard.svg)
+
+Regenerate the PNG on macOS with:
+
+```bash
+./tools/export-storyboard.sh
+```
 
 ## Repo shape
 
