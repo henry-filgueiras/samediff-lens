@@ -49,4 +49,19 @@ export const goldenExamples: GoldenExample[] = [
       "system model changed",
     ],
   },
+  {
+    id: "revised-design-spec",
+    title: "4. Revised design spec",
+    description:
+      "A larger multi-sentence revision that combines architecture drift, retry narrowing, and a stronger incident checklist.",
+    versionA:
+      "The service registry stores membership for all active workers and is queried directly by schedulers. Workers send a heartbeat every 30 seconds. If a worker misses heartbeats, the registry marks it inactive and schedulers stop assigning work to it. Retries should be attempted for failed jobs. Operators should review cluster health during incidents.",
+    versionB:
+      "Worker membership is now gossiped among nodes, and the registry is used only for bootstrap and observation. Workers emit heartbeats every 10 seconds, but schedulers rely on gossip convergence rather than direct registry reads. Failed jobs are retried only when they are idempotent, with up to 3 attempts and jittered backoff. During incidents, operators must verify gossip health, confirm bootstrap reachability, and review retry saturation before re-enabling traffic.",
+    expectedSignals: [
+      "responsibility moved from central registry to distributed gossip",
+      "narrowed retry commitment with operational constraints",
+      "stronger incident checklist and scheduler dependency shift",
+    ],
+  },
 ];

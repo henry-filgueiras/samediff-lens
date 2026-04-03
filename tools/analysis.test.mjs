@@ -105,6 +105,38 @@ test("architecture drift example surfaces system model movement", () => {
   );
 });
 
+test("revised design spec example surfaces broad architectural and operational drift", () => {
+  const example = goldenExamples.find((candidate) => candidate.id === "revised-design-spec");
+  assert.ok(example, "Expected the revised design spec example to exist.");
+
+  const result = analyzeTextPair(example.versionA, example.versionB);
+
+  assert.ok(
+    result.changedCommitments.length > 0,
+    "Expected the larger spec revision to produce changed commitments.",
+  );
+  assert.ok(
+    result.addedConcepts.some((item) => /gossip|jitter|bootstrap|idempotent/i.test(item)) ||
+      result.addedConceptsEvidence.some((item) =>
+        /gossip|jitter|bootstrap|idempotent/i.test(`${item.phrase} ${item.sourceClause}`),
+      ),
+    "Expected architectural or retry-specific concepts to be surfaced.",
+  );
+  assert.ok(
+    result.possibleContradictions.some((item) => /Responsibility|narrows/i.test(item)),
+    "Expected a responsibility-shift or narrowing hint.",
+  );
+  assert.ok(
+    result.changedCommitmentsEvidence.some(
+      (item) =>
+        /idempotent|jitter|bootstrap|gossip|verify gossip health/i.test(
+          `${item.versionA} ${item.versionB}`,
+        ),
+    ),
+    "Expected evidence for retry or incident-procedure changes.",
+  );
+});
+
 test("identical text stays low-drift", () => {
   const text = "The system should retry failed jobs.";
   const result = analyzeTextPair(text, text);
