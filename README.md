@@ -49,6 +49,36 @@ Build for a production check:
 npm run build
 ```
 
+Run the smoke tests:
+
+```bash
+npm test
+```
+
+## Bazel entrypoints
+
+This repo now includes lightweight Bazel wrappers around the existing local Vite workflow. They are intentionally simple: Bazel gives us stable entrypoints, while `npm install` still provisions the frontend toolchain.
+
+One-time setup:
+
+```bash
+npm install
+```
+
+Useful targets:
+
+```bash
+bazel run //:devserver
+bazel run //:build
+bazel run //:test
+```
+
+You can pass extra Vite flags to the dev server:
+
+```bash
+bazel run //:devserver -- --host 0.0.0.0 --port 5173
+```
+
 ## Demo flow
 
 1. Load one of the three built-in golden examples.
