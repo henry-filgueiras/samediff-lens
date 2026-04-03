@@ -176,7 +176,13 @@ textarea {
     border-color 120ms ease;
 }
 
-.button:hover {
+.button:disabled {
+  opacity: 0.58;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.button:not(:disabled):hover {
   transform: translateY(-1px);
   border-color: var(--accent);
 }
@@ -185,6 +191,15 @@ textarea {
   background: var(--accent);
   border-color: var(--accent);
   color: #fff8f2;
+}
+
+.button-quiet {
+  background: rgba(255, 250, 241, 0.78);
+}
+
+.button-small {
+  padding: 8px 12px;
+  font-size: 0.92rem;
 }
 
 .example-note {
@@ -236,6 +251,31 @@ textarea {
 
 .text-pane {
   display: block;
+}
+
+.pane-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.pane-header .pane-label {
+  margin-bottom: 0;
+}
+
+.pane-meta,
+.pane-error {
+  margin: -2px 0 10px;
+  font-size: 0.92rem;
+}
+
+.pane-meta {
+  color: var(--muted);
+}
+
+.pane-error {
+  color: var(--accent);
 }
 
 .pane-textarea {

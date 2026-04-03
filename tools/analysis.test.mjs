@@ -17,6 +17,7 @@ process.on("exit", () => {
 
 const { analyzeTextPair } = require(join(compiledDir, "analysis/analyzeTextPair.js"));
 const { goldenExamples } = require(join(compiledDir, "examples/goldenExamples.js"));
+const { formatAnalysisReport } = require(join(compiledDir, "lib/report.js"));
 
 test("golden examples return the full v0 result shape", () => {
   for (const example of goldenExamples) {
@@ -216,6 +217,41 @@ test("unrelated texts avoid rename guesses", () => {
   assert.deepEqual(result.possibleContradictions, []);
 });
 
+test("report formatting includes summary, labels, and evidence", () => {
+  const report = formatAnalysisReport({
+    generatedAt: "2026-04-03T12:00:00.000Z",
+    result: analyzeTextPair(
+      "The system should retry failed jobs.",
+      "The system retries only idempotent jobs up to 3 times with jitter.",
+    ),
+    versionALabel: "retry-spec-v1.md",
+    versionBLabel: "retry-spec-v2.md",
+  });
+
+  assert.match(report, /^# SameDiff Lens Report/m);
+  assert.match(report, /Generated: 2026-04-03T12:00:00.000Z/);
+  assert.match(report, /- A: retry-spec-v1.md/);
+  assert.match(report, /- B: retry-spec-v2.md/);
+  assert.match(report, /## Summary/);
+  assert.match(report, /## Changed commitments/);
+  assert.match(report, /Signals:/);
+  assert.match(report, /## Added concepts/);
+  assert.match(report, /Evidence:/);
+});
+
+test("report formatting omits empty categories and adds a no-findings note", () => {
+  const report = formatAnalysisReport({
+    result: analyzeTextPair(
+      "The system should retry failed jobs.",
+      "The system should retry failed jobs.",
+    ),
+  });
+
+  assert.doesNotMatch(report, /## Added concepts/);
+  assert.doesNotMatch(report, /## Changed commitments/);
+  assert.match(report, /No populated semantic-drift categories were detected/);
+});
+
 function compileAnalysisModules() {
   const outDir = mkdtempSync(join(tmpdir(), "samediff-lens-analysis-"));
   const sourceFiles = [
@@ -223,6 +259,7 @@ function compileAnalysisModules() {
     resolve(repoRoot, "src/analysis/heuristics.ts"),
     resolve(repoRoot, "src/analysis/types.ts"),
     resolve(repoRoot, "src/examples/goldenExamples.ts"),
+    resolve(repoRoot, "src/lib/report.ts"),
   ];
 
   const compilerHost = ts.createCompilerHost({

@@ -1,12 +1,23 @@
-import { useState } from "react";
+import { useRef, useState, type ChangeEvent } from "react";
 import { TextPane } from "./components/TextPane";
 import { ResultsPanel } from "./components/ResultsPanel";
 import { ExamplePicker } from "./components/ExamplePicker";
 import { analyzeTextPair } from "./analysis/analyzeTextPair";
 import type { AnalysisResult } from "./analysis/types";
 import { goldenExamples } from "./examples/goldenExamples";
+import {
+  isFilePickerAbortError,
+  openLocalTextFile,
+  supportsModernFilePicker,
+} from "./lib/localFiles";
+import { formatAnalysisReport } from "./lib/report";
 
 const initialExample = goldenExamples[0];
+type PaneKey = "A" | "B";
+type PaneMeta = {
+  error: string | null;
+  fileName: string | null;
+};
 
 function App() {
   const [selectedExampleId, setSelectedExampleId] = useState(initialExample.id);
@@ -15,24 +26,147 @@ function App() {
   const [result, setResult] = useState<AnalysisResult | null>(
     analyzeTextPair(initialExample.versionA, initialExample.versionB),
   );
+  const [paneMeta, setPaneMeta] = useState<Record<PaneKey, PaneMeta>>({
+    A: { error: null, fileName: null },
+    B: { error: null, fileName: null },
+  });
+  const versionAInputRef = useRef<HTMLInputElement>(null);
+  const versionBInputRef = useRef<HTMLInputElement>(null);
 
   const selectedExample =
     goldenExamples.find((example) => example.id === selectedExampleId) ?? initialExample;
+  const usingSelectedExample =
+    !paneMeta.A.fileName &&
+    !paneMeta.B.fileName &&
+    versionA === selectedExample.versionA &&
+    versionB === selectedExample.versionB;
+
+  const activeComparisonTitle = usingSelectedExample ? selectedExample.title : "Custom comparison";
+  const activeComparisonDescription = usingSelectedExample
+    ? selectedExample.description
+    : "Compare your own local notes, prompts, specs, or runbooks. Everything stays in the browser, and export produces a lightweight local report.";
+  const activeComparisonSignals = usingSelectedExample
+    ? selectedExample.expectedSignals
+    : [
+        "Load one local .txt or .md file into each side, then compare.",
+        "Inspect the evidence blocks to see why the v0 heuristic fired.",
+        "Export a compact Markdown report without sending text anywhere.",
+      ];
 
   const handleCompare = () => {
     setResult(analyzeTextPair(versionA, versionB));
   };
 
+  const updatePaneMeta = (pane: PaneKey, next: Partial<PaneMeta>) => {
+    setPaneMeta((current) => ({
+      ...current,
+      [pane]: {
+        ...current[pane],
+        ...next,
+      },
+    }));
+  };
+
+  const updateVersion = (pane: PaneKey, nextValue: string) => {
+    if (pane === "A") {
+      setVersionA(nextValue);
+    } else {
+      setVersionB(nextValue);
+    }
+
+    updatePaneMeta(pane, { error: null });
+    setResult(null);
+  };
+
+  const loadFileIntoPane = async (pane: PaneKey, file: File) => {
+    try {
+      const text = await file.text();
+      updateVersion(pane, text);
+      updatePaneMeta(pane, { error: null, fileName: file.name });
+    } catch {
+      updatePaneMeta(pane, {
+        error: "Could not read that file. Try a plain text or Markdown file.",
+        fileName: null,
+      });
+    }
+  };
+
+  const handleOpenFile = async (pane: PaneKey) => {
+    updatePaneMeta(pane, { error: null });
+
+    if (supportsModernFilePicker()) {
+      try {
+        const file = await openLocalTextFile();
+        if (!file) {
+          return;
+        }
+
+        await loadFileIntoPane(pane, file);
+        return;
+      } catch (error) {
+        if (isFilePickerAbortError(error)) {
+          return;
+        }
+      }
+    }
+
+    const fallbackInput = pane === "A" ? versionAInputRef.current : versionBInputRef.current;
+    fallbackInput?.click();
+  };
+
+  const handleFallbackFileSelected =
+    (pane: PaneKey) => async (event: ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0] ?? null;
+      event.target.value = "";
+
+      if (!file) {
+        return;
+      }
+
+      await loadFileIntoPane(pane, file);
+    };
+
   const handleLoadExample = () => {
     setVersionA(selectedExample.versionA);
     setVersionB(selectedExample.versionB);
+    setPaneMeta({
+      A: { error: null, fileName: null },
+      B: { error: null, fileName: null },
+    });
     setResult(analyzeTextPair(selectedExample.versionA, selectedExample.versionB));
   };
 
   const handleReset = () => {
     setVersionA("");
     setVersionB("");
+    setPaneMeta({
+      A: { error: null, fileName: null },
+      B: { error: null, fileName: null },
+    });
     setResult(null);
+  };
+
+  const handleExportReport = () => {
+    if (!result) {
+      return;
+    }
+
+    const report = formatAnalysisReport({
+      generatedAt: new Date().toISOString(),
+      result,
+      versionALabel: paneMeta.A.fileName ?? "Version A",
+      versionBLabel: paneMeta.B.fileName ?? "Version B",
+    });
+    const blob = new Blob([report], { type: "text/markdown;charset=utf-8" });
+    const downloadUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+
+    anchor.href = downloadUrl;
+    anchor.download = `samediff-report-${new Date().toISOString().replaceAll(":", "-")}.md`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(downloadUrl);
   };
 
   return (
@@ -70,6 +204,9 @@ function App() {
           <button className="button button-primary" type="button" onClick={handleCompare}>
             Compare
           </button>
+          <button className="button" type="button" onClick={handleExportReport} disabled={!result}>
+            Export report
+          </button>
           <button className="button" type="button" onClick={handleReset}>
             Reset
           </button>
@@ -78,13 +215,15 @@ function App() {
 
       <section className="example-note">
         <div>
-          <h2>{selectedExample.title}</h2>
-          <p>{selectedExample.description}</p>
+          <h2>{activeComparisonTitle}</h2>
+          <p>{activeComparisonDescription}</p>
         </div>
         <div className="expectation-block">
-          <span className="mini-label">Expected spirit</span>
+          <span className="mini-label">
+            {usingSelectedExample ? "Expected spirit" : "Good fit"}
+          </span>
           <ul>
-            {selectedExample.expectedSignals.map((signal) => (
+            {activeComparisonSignals.map((signal) => (
               <li key={signal}>{signal}</li>
             ))}
           </ul>
@@ -96,14 +235,26 @@ function App() {
           <TextPane
             label="Version A"
             value={versionA}
-            onChange={setVersionA}
+            onChange={(nextValue) => updateVersion("A", nextValue)}
             placeholder="Paste the baseline text here."
+            openButtonLabel="Open file for A"
+            onOpenFile={() => void handleOpenFile("A")}
+            onFallbackFileSelected={(event) => void handleFallbackFileSelected("A")(event)}
+            fileInputRef={versionAInputRef}
+            selectedFileName={paneMeta.A.fileName}
+            errorMessage={paneMeta.A.error}
           />
           <TextPane
             label="Version B"
             value={versionB}
-            onChange={setVersionB}
+            onChange={(nextValue) => updateVersion("B", nextValue)}
             placeholder="Paste the revised text here."
+            openButtonLabel="Open file for B"
+            onOpenFile={() => void handleOpenFile("B")}
+            onFallbackFileSelected={(event) => void handleFallbackFileSelected("B")(event)}
+            fileInputRef={versionBInputRef}
+            selectedFileName={paneMeta.B.fileName}
+            errorMessage={paneMeta.B.error}
           />
         </div>
 

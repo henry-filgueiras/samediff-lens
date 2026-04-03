@@ -12,6 +12,7 @@ SameDiff Lens is a local-first browser tool for comparing two text versions and 
 1. Load one of the built-in examples.
 2. Click `Compare`.
 3. Inspect the category cards and the compact evidence blocks.
+4. Or open two local `.txt` / `.md` files and export a report.
 
 ## What this is / what this is not
 
@@ -20,6 +21,7 @@ This is:
 - a browser-only proof-object for semantic drift
 - a deterministic heuristic analyzer you can inspect
 - a faster way to spot contract changes that raw diff under-explains
+- a local-only tool that can open plain text or Markdown files and export a compact report
 
 This is not:
 
@@ -61,6 +63,8 @@ This first pass runs entirely in the browser with no backend, no auth, no databa
 - compare action-like bullets and TODO-style phrasing
 - guess renamed ideas when surrounding context stays similar
 - flag possible contradictions or responsibility moves
+- load local `.txt` / `.md` files into either side of the comparison
+- export the current result as a lightweight Markdown report
 - summarize the overall drift in plain language
 
 ## What v0 does not do
@@ -72,6 +76,12 @@ v0 is intentionally narrow and honest. It does not:
 - persist data between sessions
 - support collaborative workflows or version history
 - guarantee correct classification on arbitrary prose
+
+## Good use cases
+
+- comparing two versions of a design note before review
+- comparing prompt revisions for policy or stance drift
+- comparing spec, incident runbook, or ops checklist edits
 
 ## Run locally
 
