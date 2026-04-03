@@ -16,6 +16,29 @@ function renderStringList(items: string[]) {
   );
 }
 
+function renderConceptEvidenceList(
+  items: Array<{ phrase: string; sourceClause: string }>,
+  emptyLabel: string,
+) {
+  if (items.length === 0) {
+    return <p className="empty-state">{emptyLabel}</p>;
+  }
+
+  return (
+    <ul className="result-list evidence-list">
+      {items.map((item) => (
+        <li key={`${item.phrase}-${item.sourceClause}`}>
+          <div>{item.phrase}</div>
+          <div className="evidence-block">
+            <span className="evidence-label">Evidence</span>
+            <p>From: {item.sourceClause}</p>
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export function ResultsPanel({ result, hasInput }: ResultsPanelProps) {
   if (!hasInput) {
     return (
@@ -57,22 +80,32 @@ export function ResultsPanel({ result, hasInput }: ResultsPanelProps) {
 
       <div className="results-grid">
         <CategoryCard title="Added concepts" hasItems={result.addedConcepts.length > 0}>
-          {renderStringList(result.addedConcepts)}
+          {renderConceptEvidenceList(result.addedConceptsEvidence, "None detected.")}
         </CategoryCard>
 
         <CategoryCard title="Removed concepts" hasItems={result.removedConcepts.length > 0}>
-          {renderStringList(result.removedConcepts)}
+          {renderConceptEvidenceList(result.removedConceptsEvidence, "None detected.")}
         </CategoryCard>
 
         <CategoryCard title="Renamed ideas" hasItems={result.renamedIdeas.length > 0}>
-          <ul className="result-list">
+          <ul className="result-list evidence-list">
             {result.renamedIdeas.map((item) => (
               <li key={`${item.from}-${item.to}`}>
-                <strong>{item.from}</strong>
-                {" -> "}
-                <strong>{item.to}</strong>
+                <div>
+                  <strong>{item.from}</strong>
+                  {" -> "}
+                  <strong>{item.to}</strong>
+                </div>
                 <span className="meta-inline">({item.confidence} confidence)</span>
-                {item.note ? ` ${item.note}` : ""}
+                <div className="evidence-block">
+                  <span className="evidence-label">Why this fired</span>
+                  {item.note ? <p>{item.note}</p> : null}
+                  {item.sharedContext && item.sharedContext.length > 0 ? (
+                    <p>Shared anchors: {item.sharedContext.join(", ")}</p>
+                  ) : null}
+                  {item.versionA ? <p>A: {item.versionA}</p> : null}
+                  {item.versionB ? <p>B: {item.versionB}</p> : null}
+                </div>
               </li>
             ))}
           </ul>
@@ -82,7 +115,19 @@ export function ResultsPanel({ result, hasInput }: ResultsPanelProps) {
           title="Changed commitments"
           hasItems={result.changedCommitments.length > 0}
         >
-          {renderStringList(result.changedCommitments)}
+          <ul className="result-list evidence-list">
+            {result.changedCommitmentsEvidence.map((item) => (
+              <li key={item.summary}>
+                <div>{item.summary}</div>
+                <div className="evidence-block">
+                  <span className="evidence-label">Why this fired</span>
+                  <p>A: {item.versionA}</p>
+                  <p>B: {item.versionB}</p>
+                  <p>Signals: {item.triggers.join(", ")}</p>
+                </div>
+              </li>
+            ))}
+          </ul>
         </CategoryCard>
 
         <CategoryCard title="Action items added" hasItems={result.actionItemsAdded.length > 0}>
@@ -100,7 +145,19 @@ export function ResultsPanel({ result, hasInput }: ResultsPanelProps) {
           title="Possible contradictions"
           hasItems={result.possibleContradictions.length > 0}
         >
-          {renderStringList(result.possibleContradictions)}
+          <ul className="result-list evidence-list">
+            {result.possibleContradictionsEvidence.map((item) => (
+              <li key={item.summary}>
+                <div>{item.summary}</div>
+                <div className="evidence-block">
+                  <span className="evidence-label">Why this fired</span>
+                  <p>Anchors: {item.anchors.join(", ")}</p>
+                  <p>A: {item.versionA}</p>
+                  <p>B: {item.versionB}</p>
+                </div>
+              </li>
+            ))}
+          </ul>
         </CategoryCard>
       </div>
     </section>

@@ -26,10 +26,14 @@ test("golden examples return the full v0 result shape", () => {
     assert.ok(Array.isArray(result.addedConcepts));
     assert.ok(Array.isArray(result.removedConcepts));
     assert.ok(Array.isArray(result.renamedIdeas));
-    assert.ok(Array.isArray(result.changedCommitments));
-    assert.ok(Array.isArray(result.actionItemsAdded));
-    assert.ok(Array.isArray(result.actionItemsRemoved));
-    assert.ok(Array.isArray(result.possibleContradictions));
+  assert.ok(Array.isArray(result.changedCommitments));
+  assert.ok(Array.isArray(result.actionItemsAdded));
+  assert.ok(Array.isArray(result.actionItemsRemoved));
+  assert.ok(Array.isArray(result.possibleContradictions));
+  assert.ok(Array.isArray(result.addedConceptsEvidence));
+  assert.ok(Array.isArray(result.removedConceptsEvidence));
+  assert.ok(Array.isArray(result.changedCommitmentsEvidence));
+  assert.ok(Array.isArray(result.possibleContradictionsEvidence));
   }
 });
 
@@ -44,8 +48,20 @@ test("spec drift example surfaces narrowed retry behavior", () => {
     "Expected narrowed scope language in changed commitments.",
   );
   assert.ok(
+    result.changedCommitmentsEvidence.some(
+      (item) =>
+        item.versionA.includes("retry failed jobs") &&
+        item.versionB.includes("idempotent jobs"),
+    ),
+    "Expected commitment evidence to retain the triggering A/B clauses.",
+  );
+  assert.ok(
     result.addedConcepts.some((item) => item.includes("idempotent") || item.includes("jitter")),
     "Expected operational constraint concepts to be surfaced.",
+  );
+  assert.ok(
+    result.addedConceptsEvidence.some((item) => item.sourceClause.includes("jitter")),
+    "Expected added concept evidence to retain the source clause.",
   );
 });
 
@@ -83,6 +99,10 @@ test("architecture drift example surfaces system model movement", () => {
     result.possibleContradictions.some((item) => item.includes("Responsibility")),
     "Expected a responsibility-shift contradiction hint.",
   );
+  assert.ok(
+    result.possibleContradictionsEvidence.some((item) => item.anchors.includes("membership")),
+    "Expected contradiction evidence to retain anchor terms.",
+  );
 });
 
 test("identical text stays low-drift", () => {
@@ -96,6 +116,10 @@ test("identical text stays low-drift", () => {
   assert.deepEqual(result.actionItemsAdded, []);
   assert.deepEqual(result.actionItemsRemoved, []);
   assert.deepEqual(result.possibleContradictions, []);
+  assert.deepEqual(result.addedConceptsEvidence, []);
+  assert.deepEqual(result.removedConceptsEvidence, []);
+  assert.deepEqual(result.changedCommitmentsEvidence, []);
+  assert.deepEqual(result.possibleContradictionsEvidence, []);
   assert.match(result.summary, /did not find a strong semantic shift/i);
 });
 
@@ -110,6 +134,10 @@ test("empty versus empty returns a safe empty result", () => {
     actionItemsAdded: [],
     actionItemsRemoved: [],
     possibleContradictions: [],
+    addedConceptsEvidence: [],
+    removedConceptsEvidence: [],
+    changedCommitmentsEvidence: [],
+    possibleContradictionsEvidence: [],
     summary: "No text provided yet. Paste two versions or load a golden example to inspect drift.",
   });
 });
@@ -138,6 +166,10 @@ test("obvious narrowing also raises a contradiction hint", () => {
   assert.ok(
     result.possibleContradictions.some((item) => /narrows/i.test(item)),
     "Expected a contradiction or narrowing hint.",
+  );
+  assert.ok(
+    result.possibleContradictionsEvidence.some((item) => item.anchors.includes("email")),
+    "Expected contradiction evidence to include overlapping anchors.",
   );
 });
 

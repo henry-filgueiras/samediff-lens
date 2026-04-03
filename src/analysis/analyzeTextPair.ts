@@ -25,6 +25,10 @@ export function analyzeTextPair(versionA: string, versionB: string): AnalysisRes
       actionItemsAdded: [],
       actionItemsRemoved: [],
       possibleContradictions: [],
+      addedConceptsEvidence: [],
+      removedConceptsEvidence: [],
+      changedCommitmentsEvidence: [],
+      possibleContradictionsEvidence: [],
       summary: "No text provided yet. Paste two versions or load a golden example to inspect drift.",
     };
   }
@@ -34,12 +38,16 @@ export function analyzeTextPair(versionA: string, versionB: string): AnalysisRes
   const pairs = matchUnits(aUnits, bUnits);
   const unmatchedA = getUnmatchedUnits(aUnits, pairs, "a");
   const unmatchedB = getUnmatchedUnits(bUnits, pairs, "b");
+  const addedConceptsEvidence = detectConceptChanges(bUnits, aUnits);
+  const removedConceptsEvidence = detectConceptChanges(aUnits, bUnits);
+  const changedCommitmentsEvidence = detectChangedCommitments(pairs);
+  const possibleContradictionsEvidence = detectPossibleContradictions(aUnits, bUnits);
 
   const actionDiff = compareActionItems(extractActionItems(aUnits), extractActionItems(bUnits));
 
   const result: AnalysisResult = {
-    addedConcepts: detectConceptChanges(bUnits, aUnits),
-    removedConcepts: detectConceptChanges(aUnits, bUnits),
+    addedConcepts: addedConceptsEvidence.map((item) => item.phrase),
+    removedConcepts: removedConceptsEvidence.map((item) => item.phrase),
     renamedIdeas: detectRenameIdeas([
       ...pairs,
       ...unmatchedA.flatMap((a) =>
@@ -50,10 +58,14 @@ export function analyzeTextPair(versionA: string, versionB: string): AnalysisRes
         })),
       ),
     ]),
-    changedCommitments: detectChangedCommitments(pairs),
+    changedCommitments: changedCommitmentsEvidence.map((item) => item.summary),
     actionItemsAdded: actionDiff.added,
     actionItemsRemoved: actionDiff.removed,
-    possibleContradictions: detectPossibleContradictions(aUnits, bUnits),
+    possibleContradictions: possibleContradictionsEvidence.map((item) => item.summary),
+    addedConceptsEvidence,
+    removedConceptsEvidence,
+    changedCommitmentsEvidence,
+    possibleContradictionsEvidence,
     summary: "",
   };
 

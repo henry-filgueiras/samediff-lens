@@ -109,6 +109,17 @@ function App() {
 
         <ResultsPanel result={result} hasInput={Boolean(versionA.trim() || versionB.trim())} />
       </main>
+
+      <footer className="app-footer">
+        <span>SameDiff Lens is heuristic / experimental.</span>
+        <a
+          href="https://github.com/henry-filgueiras/samediff-lens"
+          target="_blank"
+          rel="noreferrer"
+        >
+          View source on GitHub
+        </a>
+      </footer>
     </div>
   );
 }

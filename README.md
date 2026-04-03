@@ -2,12 +2,39 @@
 
 SameDiff Lens is a local-first browser tool for comparing two text versions and surfacing the kinds of semantic changes that raw line diff often misses. Instead of focusing only on inserted and deleted lines, it highlights likely shifts in concepts, commitments, action items, renamed ideas, and possible contradictions.
 
-## Try it
+## Live demo
 
-- Live demo: coming soon at `https://<owner>.github.io/samediff-lens/`
+- [Try SameDiff Lens](https://henry-filgueiras.github.io/samediff-lens/)
 - Local run: `npm install && npm run dev`
 
-## Example input/output
+## Try it in 20 seconds
+
+1. Load one of the built-in examples.
+2. Click `Compare`.
+3. Inspect the category cards and the compact evidence blocks.
+
+## What this is / what this is not
+
+This is:
+
+- a browser-only proof-object for semantic drift
+- a deterministic heuristic analyzer you can inspect
+- a faster way to spot contract changes that raw diff under-explains
+
+This is not:
+
+- a backend service or collaboration platform
+- a claim of deep semantic understanding
+- an LLM wrapper or hidden AI workflow
+
+## Why this exists
+
+- Raw diff shows where text changed, not necessarily what changed in meaning.
+- Small edits can quietly narrow commitments or move responsibilities.
+- Spec, prompt, and architecture drift often matter more than line count.
+- v0 aims for honest, inspectable signals over opaque sophistication.
+
+## Concrete example
 
 ```text
 Version A
@@ -22,12 +49,6 @@ Expected v0 output, in spirit:
 - changed commitment: the retry policy got narrower
 - added concepts: `idempotent jobs`, `up to 3 times`, `jitter`
 - possible contradiction: the broader earlier claim is now limited
-
-## Why raw diff is not enough
-
-Traditional diff is excellent at showing where text changed, but it is weak at explaining what changed in meaning. A one-line edit can quietly narrow a policy, move a system responsibility, add a hidden constraint, or change an assistant's stance without looking dramatic in a line-by-line view.
-
-SameDiff Lens is a proof-object for that gap. It asks: "What changed in the contract, not just the characters?"
 
 The v0 contract lives in [docs/v0-contract.md](docs/v0-contract.md).
 
@@ -125,25 +146,30 @@ You can pass extra Vite flags to the dev server:
 bazel run //:devserver -- --host 0.0.0.0 --port 5173
 ```
 
-## Demo flow
-
-1. Load one of the three built-in golden examples.
-2. Inspect Version A and Version B side by side.
-3. Click `Compare`.
-4. Review the category cards in the results panel.
-
 ## Screenshots
+
+![SameDiff Lens app screenshot](docs/screenshots/app-home.png)
 
 ![SameDiff Lens storyboard](docs/storyboard/samediff-lens-storyboard.png)
 
+- App screenshot: [docs/screenshots/app-home.png](docs/screenshots/app-home.png)
 - Storyboard PNG: [docs/storyboard/samediff-lens-storyboard.png](docs/storyboard/samediff-lens-storyboard.png)
 - Storyboard source: [docs/storyboard/samediff-lens-storyboard.svg](docs/storyboard/samediff-lens-storyboard.svg)
 
-Regenerate the PNG on macOS with:
+Capture a fresh app screenshot locally with:
+
+```bash
+npx playwright install chromium
+npm run screenshot
+```
+
+Storyboard export on macOS:
 
 ```bash
 ./tools/export-storyboard.sh
 ```
+
+Animated GIF walkthrough: to be added.
 
 ## Repo shape
 

@@ -1,4 +1,12 @@
-import type { Confidence, MatchedPair, RenamedIdea, Unit } from "./types";
+import type {
+  CommitmentEvidence,
+  ConceptEvidence,
+  Confidence,
+  ContradictionEvidence,
+  MatchedPair,
+  RenamedIdea,
+  Unit,
+} from "./types";
 
 const STOP_WORDS = new Set([
   "a",
@@ -262,7 +270,11 @@ function isCandidatePhrase(tokens: string[]): boolean {
   return true;
 }
 
-export function detectConceptChanges(primaryUnits: Unit[], secondaryUnits: Unit[], limit = 4): string[] {
+export function detectConceptChanges(
+  primaryUnits: Unit[],
+  secondaryUnits: Unit[],
+  limit = 4,
+): ConceptEvidence[] {
   const secondaryContent = new Set(secondaryUnits.flatMap((unit) => unit.contentTokens));
   const candidates = primaryUnits.flatMap((unit) => {
     const uniqueTokens = unit.contentTokens.filter(
@@ -278,10 +290,15 @@ export function detectConceptChanges(primaryUnits: Unit[], secondaryUnits: Unit[
 
   return candidates
     .sort((left, right) => right.score - left.score)
-    .map((candidate) => candidate.phrase)
-    .filter((phrase, index, phrases) => {
-      return !phrases.slice(0, index).some((chosen) => chosen.includes(phrase));
+    .filter((candidate, index, allCandidates) => {
+      return !allCandidates
+        .slice(0, index)
+        .some((chosen) => chosen.phrase.includes(candidate.phrase));
     })
+    .map((candidate) => ({
+      phrase: candidate.phrase,
+      sourceClause: candidate.sourceClause,
+    }))
     .slice(0, limit);
 }
 
@@ -304,7 +321,7 @@ export function compareActionItems(aItems: string[], bItems: string[]) {
   return { added, removed };
 }
 
-export function detectChangedCommitments(pairs: MatchedPair[]): string[] {
+export function detectChangedCommitments(pairs: MatchedPair[]): CommitmentEvidence[] {
   const findings = pairs.flatMap(({ a, b }) => {
     const notes: string[] = [];
 
@@ -347,10 +364,17 @@ export function detectChangedCommitments(pairs: MatchedPair[]): string[] {
       return [];
     }
 
-    return [`${shorten(a.raw)} -> ${shorten(b.raw)} (${notes.join(", ")})`];
+    return [
+      {
+        summary: `${shorten(a.raw)} -> ${shorten(b.raw)} (${notes.join(", ")})`,
+        versionA: a.raw,
+        versionB: b.raw,
+        triggers: notes,
+      },
+    ];
   });
 
-  return uniqueStrings(findings);
+  return uniqueEvidenceByKey(findings, (item) => item.summary);
 }
 
 export function detectRenameIdeas(pairs: MatchedPair[]): RenamedIdea[] {
@@ -390,14 +414,17 @@ export function detectRenameIdeas(pairs: MatchedPair[]): RenamedIdea[] {
       to: toPhrase,
       confidence,
       note: `Shares context around ${sharedAnchors.slice(0, 2).join(", ")}.`,
+      sharedContext: sharedAnchors,
+      versionA: a.raw,
+      versionB: b.raw,
     });
   });
 
   return uniqueRenameIdeas(findings);
 }
 
-export function detectPossibleContradictions(aUnits: Unit[], bUnits: Unit[]): string[] {
-  const findings: string[] = [];
+export function detectPossibleContradictions(aUnits: Unit[], bUnits: Unit[]): ContradictionEvidence[] {
+  const findings: ContradictionEvidence[] = [];
 
   aUnits.forEach((a) => {
     bUnits.forEach((b) => {
@@ -410,34 +437,50 @@ export function detectPossibleContradictions(aUnits: Unit[], bUnits: Unit[]): st
       }
 
       if (!containsAny(a.raw, NARROWING_MARKERS) && containsAny(b.raw, NARROWING_MARKERS)) {
-        findings.push(
-          `B narrows ${sharedAnchors.join("/")} with limiting language that may contradict A's broader claim.`,
-        );
+        findings.push({
+          summary: `B narrows ${sharedAnchors.join("/")} with limiting language that may contradict A's broader claim.`,
+          anchors: sharedAnchors,
+          versionA: a.raw,
+          versionB: b.raw,
+        });
       }
 
       if (containsAny(a.raw, NEGATION_MARKERS) !== containsAny(b.raw, NEGATION_MARKERS)) {
-        findings.push(`Negation or exclusivity flips around ${sharedAnchors.join("/")} may conflict.`);
+        findings.push({
+          summary: `Negation or exclusivity flips around ${sharedAnchors.join("/")} may conflict.`,
+          anchors: sharedAnchors,
+          versionA: a.raw,
+          versionB: b.raw,
+        });
       }
 
       if (
         hasAnyToken(a.contentTokens, STORAGE_VERBS) &&
         (hasAnyToken(b.contentTokens, DISTRIBUTED_VERBS) || /only used for/i.test(b.raw))
       ) {
-        findings.push(
-          `Responsibility for ${sharedAnchors.join("/")} appears to move from central storage toward distribution or limited usage.`,
-        );
+        findings.push({
+          summary: `Responsibility for ${sharedAnchors.join("/")} appears to move from central storage toward distribution or limited usage.`,
+          anchors: sharedAnchors,
+          versionA: a.raw,
+          versionB: b.raw,
+        });
       }
 
       if (
         /\brequired\b/i.test(a.raw) && /\boptional\b/i.test(b.raw) ||
         /\boptional\b/i.test(a.raw) && /\brequired\b/i.test(b.raw)
       ) {
-        findings.push(`Required versus optional language changes around ${sharedAnchors.join("/")} may conflict.`);
+        findings.push({
+          summary: `Required versus optional language changes around ${sharedAnchors.join("/")} may conflict.`,
+          anchors: sharedAnchors,
+          versionA: a.raw,
+          versionB: b.raw,
+        });
       }
     });
   });
 
-  return uniqueStrings(findings).slice(0, 3);
+  return uniqueEvidenceByKey(findings, (item) => item.summary).slice(0, 3);
 }
 
 export function buildSummary(parts: {
@@ -491,6 +534,20 @@ function uniqueRenameIdeas(items: RenamedIdea[]): RenamedIdea[] {
 
   return items.filter((item) => {
     const key = `${item.from}::${item.to}`;
+    if (seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  });
+}
+
+function uniqueEvidenceByKey<T>(items: T[], getKey: (item: T) => string): T[] {
+  const seen = new Set<string>();
+
+  return items.filter((item) => {
+    const key = getKey(item);
     if (seen.has(key)) {
       return false;
     }
@@ -604,11 +661,14 @@ function containsMarker(text: string, marker: string): boolean {
   return new RegExp(`\\b${escapedMarker}\\b`, "i").test(text);
 }
 
-function extractFocusedPhrases(raw: string, importantTokens: string[]): Array<{ phrase: string; score: number }> {
+function extractFocusedPhrases(
+  raw: string,
+  importantTokens: string[],
+): Array<{ phrase: string; score: number; sourceClause: string }> {
   const tokens = tokenize(normalize(raw));
   const stems = tokens.map((token) => stemToken(token));
   const important = new Set(importantTokens);
-  const candidates = new Map<string, number>();
+  const candidates = new Map<string, { score: number; sourceClause: string }>();
 
   stems.forEach((stem, index) => {
     if (!important.has(stem)) {
@@ -650,18 +710,27 @@ function extractFocusedPhrases(raw: string, importantTokens: string[]): Array<{ 
           (rawWindow.some((token) => /\d/.test(token)) ? 1 : 0) +
           (rawWindow[0] === "only" ? -1 : 0);
 
-        if (!phrase || (candidates.get(phrase) ?? 0) >= score) {
+        const existing = candidates.get(phrase);
+
+        if (!phrase || (existing?.score ?? 0) >= score) {
           continue;
         }
 
-        candidates.set(phrase, score);
+        candidates.set(phrase, {
+          score,
+          sourceClause: raw,
+        });
       }
     }
   });
 
   return [...candidates.entries()]
-    .sort((left, right) => right[1] - left[1])
-    .map(([phrase, score]) => ({ phrase, score }))
+    .sort((left, right) => right[1].score - left[1].score)
+    .map(([phrase, details]) => ({
+      phrase,
+      score: details.score,
+      sourceClause: details.sourceClause,
+    }))
     .filter((candidate, index, array) => {
       return !array.slice(0, index).some((earlier) => earlier.phrase.includes(candidate.phrase));
     });
