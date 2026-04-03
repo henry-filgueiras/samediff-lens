@@ -85,6 +85,73 @@ test("architecture drift example surfaces system model movement", () => {
   );
 });
 
+test("identical text stays low-drift", () => {
+  const text = "The system should retry failed jobs.";
+  const result = analyzeTextPair(text, text);
+
+  assert.deepEqual(result.addedConcepts, []);
+  assert.deepEqual(result.removedConcepts, []);
+  assert.deepEqual(result.renamedIdeas, []);
+  assert.deepEqual(result.changedCommitments, []);
+  assert.deepEqual(result.actionItemsAdded, []);
+  assert.deepEqual(result.actionItemsRemoved, []);
+  assert.deepEqual(result.possibleContradictions, []);
+  assert.match(result.summary, /did not find a strong semantic shift/i);
+});
+
+test("empty versus empty returns a safe empty result", () => {
+  const result = analyzeTextPair("", "");
+
+  assert.deepEqual(result, {
+    addedConcepts: [],
+    removedConcepts: [],
+    renamedIdeas: [],
+    changedCommitments: [],
+    actionItemsAdded: [],
+    actionItemsRemoved: [],
+    possibleContradictions: [],
+    summary: "No text provided yet. Paste two versions or load a golden example to inspect drift.",
+  });
+});
+
+test("action-item adds and removals are surfaced directly", () => {
+  const result = analyzeTextPair(
+    "TODO: remove legacy retry path.\nReview logs.",
+    "TODO: add retry dashboard.\nReview logs.",
+  );
+
+  assert.deepEqual(result.actionItemsAdded, ["TODO: add retry dashboard"]);
+  assert.deepEqual(result.actionItemsRemoved, ["TODO: remove legacy retry path"]);
+  assert.deepEqual(result.renamedIdeas, []);
+});
+
+test("obvious narrowing also raises a contradiction hint", () => {
+  const result = analyzeTextPair(
+    "All users must verify email.",
+    "Only admin users must verify email.",
+  );
+
+  assert.ok(
+    result.changedCommitments.some((item) => item.includes("narrows scope")),
+    "Expected the commitment analysis to detect narrowing.",
+  );
+  assert.ok(
+    result.possibleContradictions.some((item) => /narrows/i.test(item)),
+    "Expected a contradiction or narrowing hint.",
+  );
+});
+
+test("unrelated texts avoid rename guesses", () => {
+  const result = analyzeTextPair(
+    "Bananas are yellow and grow in bunches.",
+    "PostgreSQL supports transactional DDL and indexes.",
+  );
+
+  assert.deepEqual(result.renamedIdeas, []);
+  assert.deepEqual(result.changedCommitments, []);
+  assert.deepEqual(result.possibleContradictions, []);
+});
+
 function compileAnalysisModules() {
   const outDir = mkdtempSync(join(tmpdir(), "samediff-lens-analysis-"));
   const sourceFiles = [

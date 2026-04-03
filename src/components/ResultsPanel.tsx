@@ -43,6 +43,9 @@ export function ResultsPanel({ result, hasInput }: ResultsPanelProps) {
           <p className="results-subtitle">
             Structured output from a deterministic, inspectable heuristic pass.
           </p>
+          <p className="results-helper">
+            False positives and false negatives are expected in v0.
+          </p>
         </div>
         <span className="mini-badge">v0 heuristic analyzer</span>
       </div>

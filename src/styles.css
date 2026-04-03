@@ -205,10 +205,16 @@ textarea {
 
 .example-note p,
 .results-subtitle,
+.results-helper,
 .empty-state,
 .results-placeholder p {
   margin: 0;
   color: var(--muted);
+}
+
+.results-helper {
+  margin-top: 6px;
+  font-size: 0.94rem;
 }
 
 .expectation-block ul,
