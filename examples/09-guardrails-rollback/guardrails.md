@@ -13,9 +13,9 @@ calls must use mTLS in addition to bearer tokens.
 
 ## Encryption
 
-During the beta period, inter-service traffic should use TLS 1.2
-or higher. Data at rest should be encrypted. Encryption keys may
-be rotated annually.
+All inter-service traffic must use TLS 1.3. Data at rest must be
+encrypted with AES-256. Encryption keys must be rotated every 90
+days. Production deployments enforce this via proxy-level policy.
 
 ## Audit logging
 
