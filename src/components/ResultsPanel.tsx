@@ -4,6 +4,7 @@ import type { AnalysisResult } from "../analysis/types";
 type ResultsPanelProps = {
   result: AnalysisResult | null;
   hasInput: boolean;
+  feedbackUrl?: string | null;
 };
 
 function renderStringList(items: string[]) {
@@ -39,7 +40,7 @@ function renderConceptEvidenceList(
   );
 }
 
-export function ResultsPanel({ result, hasInput }: ResultsPanelProps) {
+export function ResultsPanel({ result, hasInput, feedbackUrl }: ResultsPanelProps) {
   if (!hasInput) {
     return (
       <section className="results-shell results-placeholder">
@@ -70,7 +71,20 @@ export function ResultsPanel({ result, hasInput }: ResultsPanelProps) {
             False positives and false negatives are expected in v0.
           </p>
         </div>
-        <span className="mini-badge">v0 heuristic analyzer</span>
+        <div className="results-actions">
+          <span className="mini-badge">v0 heuristic analyzer</span>
+          {feedbackUrl ? (
+            <a
+              className="button button-quiet button-small feedback-link"
+              href={feedbackUrl}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Report a weird result
+            </a>
+          ) : null}
+          {feedbackUrl ? <p className="results-feedback-note">No source text included.</p> : null}
+        </div>
       </div>
 
       <section className="summary-card">

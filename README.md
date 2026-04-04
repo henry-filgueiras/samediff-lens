@@ -2,6 +2,8 @@
 
 SameDiff Lens is a local-first browser tool for comparing two text versions and surfacing the kinds of semantic changes that raw line diff often misses. Instead of focusing only on inserted and deleted lines, it highlights likely shifts in concepts, commitments, action items, renamed ideas, and possible contradictions.
 
+Feedback on false positives, false negatives, and confusing outputs is welcome via GitHub issues.
+
 ## Live demo
 
 - [Try SameDiff Lens](https://henry-filgueiras.github.io/samediff-lens/)
@@ -22,6 +24,7 @@ This is:
 - a deterministic heuristic analyzer you can inspect
 - a faster way to spot contract changes that raw diff under-explains
 - a local-only tool that can open plain text or Markdown files and export a compact report
+- a lightweight way to report weird results without sending your full source text by default
 
 This is not:
 

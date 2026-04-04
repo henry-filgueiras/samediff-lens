@@ -11,6 +11,7 @@ import {
   supportsModernFilePicker,
 } from "./lib/localFiles";
 import { formatAnalysisReport } from "./lib/report";
+import { buildFeedbackIssueUrl } from "./lib/feedback";
 
 const initialExample = goldenExamples[0];
 type PaneKey = "A" | "B";
@@ -52,6 +53,12 @@ function App() {
         "Inspect the evidence blocks to see why the v0 heuristic fired.",
         "Export a compact Markdown report without sending text anywhere.",
       ];
+  const feedbackUrl = result
+    ? buildFeedbackIssueUrl({
+        exampleName: usingSelectedExample ? selectedExample.title : undefined,
+        result,
+      })
+    : null;
 
   const handleCompare = () => {
     setResult(analyzeTextPair(versionA, versionB));
@@ -258,7 +265,11 @@ function App() {
           />
         </div>
 
-        <ResultsPanel result={result} hasInput={Boolean(versionA.trim() || versionB.trim())} />
+        <ResultsPanel
+          result={result}
+          hasInput={Boolean(versionA.trim() || versionB.trim())}
+          feedbackUrl={feedbackUrl}
+        />
       </main>
 
       <footer className="app-footer">

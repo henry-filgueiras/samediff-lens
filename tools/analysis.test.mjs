@@ -18,6 +18,10 @@ process.on("exit", () => {
 const { analyzeTextPair } = require(join(compiledDir, "analysis/analyzeTextPair.js"));
 const { goldenExamples } = require(join(compiledDir, "examples/goldenExamples.js"));
 const { formatAnalysisReport } = require(join(compiledDir, "lib/report.js"));
+const { buildFeedbackIssueBody, buildFeedbackIssueUrl } = require(join(
+  compiledDir,
+  "lib/feedback.js",
+));
 
 test("golden examples return the full v0 result shape", () => {
   for (const example of goldenExamples) {
@@ -252,6 +256,40 @@ test("report formatting omits empty categories and adds a no-findings note", () 
   assert.match(report, /No populated semantic-drift categories were detected/);
 });
 
+test("feedback issue body includes example, summary, and fired categories without source text", () => {
+  const body = buildFeedbackIssueBody({
+    exampleName: "1. Spec drift",
+    result: analyzeTextPair(
+      "The system should retry failed jobs.",
+      "The system retries only idempotent jobs up to 3 times with jitter.",
+    ),
+  });
+
+  assert.match(body, /Example: 1. Spec drift/);
+  assert.match(body, /Summary:/);
+  assert.match(body, /Fired categories: .*Added concepts.*Changed commitments/);
+  assert.match(body, /What did you expect\?/);
+  assert.match(body, /What looked wrong\?/);
+  assert.match(body, /What kind of text was this\?/);
+  assert.match(body, /not included automatically/i);
+  assert.doesNotMatch(body, /The system retries only idempotent jobs up to 3 times with jitter/);
+});
+
+test("feedback issue URL encodes a prefilled GitHub issue", () => {
+  const url = buildFeedbackIssueUrl({
+    result: analyzeTextPair(
+      "Be helpful and concise.",
+      "Be concise, challenge weak assumptions, and separate facts from speculation.",
+    ),
+  });
+  const parsedUrl = new URL(url);
+
+  assert.equal(parsedUrl.origin, "https://github.com");
+  assert.equal(parsedUrl.pathname, "/henry-filgueiras/samediff-lens/issues/new");
+  assert.match(parsedUrl.searchParams.get("title") ?? "", /Weird result/);
+  assert.match(parsedUrl.searchParams.get("body") ?? "", /Custom comparison/);
+});
+
 function compileAnalysisModules() {
   const outDir = mkdtempSync(join(tmpdir(), "samediff-lens-analysis-"));
   const sourceFiles = [
@@ -259,6 +297,7 @@ function compileAnalysisModules() {
     resolve(repoRoot, "src/analysis/heuristics.ts"),
     resolve(repoRoot, "src/analysis/types.ts"),
     resolve(repoRoot, "src/examples/goldenExamples.ts"),
+    resolve(repoRoot, "src/lib/feedback.ts"),
     resolve(repoRoot, "src/lib/report.ts"),
   ];
 
