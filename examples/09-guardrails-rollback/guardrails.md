@@ -19,9 +19,10 @@ days. Production deployments enforce this via proxy-level policy.
 
 ## Audit logging
 
-During the beta period, sampling-based audit logging is acceptable.
-Full per-request audit logging may be deferred to Phase 2. Audit
-logs should be retained for at least 30 days.
+Every authenticated request must be logged to the audit stream,
+carrying the timestamp, principal, requested resource, and response
+status. Sampling is not permitted on production traffic. Audit logs
+must be retained for at least 365 days.
 
 ## Token rotation
 
