@@ -90,8 +90,21 @@ function computeDrift({ intent, files, title, body }) {
   const totalDeleted = files.reduce((s, f) => s + (f.deleted || 0), 0);
 
   const mentioned = new Set(intent.textDomains || []);
+  const mentionsInfra = /\b(ci|cd|pipeline|workflow|workflows|infra|infrastructure|deploy|deployment|docker|kubernetes|k8s|terraform|helm|ansible|jenkins|github actions)\b/i.test(text);
   const isMentioned = (domain) =>
     mentioned.has(domain) || text.includes(domain.toLowerCase());
+
+  // A domain counts as "infra-covered" when every file that contributed
+  // to it is an infra file AND the PR text mentions CI/infra. This stops
+  // unmentioned-domain from firing on `github` when the PR title already
+  // says "ci:".
+  const isInfraCoveredDomain = (domain) => {
+    if (!mentionsInfra) return false;
+    const domainFiles = files.filter(f => pathDomain(f.path) === domain);
+    return domainFiles.length > 0 && domainFiles.every(f =>
+      INFRA_PATTERNS.some(p => p.test(f.path)),
+    );
+  };
 
   const signals = [];
   let score = 0;
@@ -99,7 +112,9 @@ function computeDrift({ intent, files, title, body }) {
   // 1. Paths touch a domain the PR text never mentions. Fires even on a
   // single-domain mismatch — a "fix typo" PR that touches `src/payments/**`
   // without saying "payments" anywhere is already worth flagging.
-  const unmentionedDomains = touchedDomains.filter(d => !isMentioned(d));
+  const unmentionedDomains = touchedDomains.filter(
+    d => !isMentioned(d) && !isInfraCoveredDomain(d),
+  );
   if (unmentionedDomains.length > 0) {
     const weight = Math.min(0.4, 0.15 + 0.12 * (unmentionedDomains.length - 1));
     score += weight;
@@ -185,7 +200,6 @@ function computeDrift({ intent, files, title, body }) {
 
   // 6c. CI/infra files touched without any mention in the PR text.
   const infraFiles = files.filter(f => INFRA_PATTERNS.some(p => p.test(f.path)));
-  const mentionsInfra = /\b(ci|cd|pipeline|workflow|workflows|infra|infrastructure|deploy|deployment|docker|kubernetes|k8s|terraform|helm|ansible|jenkins|github actions)\b/i.test(text);
   if (infraFiles.length > 0 && !mentionsInfra) {
     score += 0.15;
     signals.push({
