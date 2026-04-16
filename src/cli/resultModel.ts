@@ -19,6 +19,11 @@ import type {
   Confidence,
   FindingProvenance,
 } from "../analysis/types";
+import {
+  describeContradiction,
+  NO_PRIOR_LINE_TEXT,
+  type ContradictionReason,
+} from "../analysis/heuristics";
 import { computeDriftScore, driftExitCode } from "./scoring";
 
 export type { FindingProvenance, SourceAnchor, AnchorQuality } from "../analysis/types";
@@ -104,10 +109,34 @@ export type CommitmentShiftFinding = {
 export type ContradictionFinding = {
   type: "contradiction";
   summary: string;
+  /** Short tag identifying which detector branch fired. */
+  reason: ContradictionReason;
+  /** One-sentence plain-English explanation of why it fired. */
+  reasonDetail: string;
+  /** How much to trust this as a *real* contradiction vs. a false positive. */
+  confidence: Confidence;
+  /**
+   * True when the prior line directly opposes the new line. False for additive
+   * cases (e.g. new line adds a narrowing constraint with no explicit
+   * opposing statement in the prior version).
+   */
+  priorLineFound: boolean;
   evidence: {
     anchors: string[];
-    before: string;
+    /** The new/"after" line (NEW LINE in human-facing output). */
     after: string;
+    /**
+     * The matched prior line. Always present — check `priorLineFound` to
+     * know whether this line genuinely opposes `after` or is merely the
+     * implicit broader statement.
+     */
+    before: string;
+    /**
+     * Exact phrase to surface when `priorLineFound` is false. Renderers
+     * that want the canonical wording can use this instead of inventing
+     * their own.
+     */
+    priorLineUnavailableText: string | null;
   };
   provenance: FindingProvenance | null;
 };
@@ -171,16 +200,24 @@ export function buildDiffResult(
     }));
 
   const contradictions: ContradictionFinding[] =
-    analysis.possibleContradictionsEvidence.map((ev) => ({
-      type: "contradiction" as const,
-      summary: ev.summary,
-      evidence: {
-        anchors: ev.anchors,
-        before: ev.versionA,
-        after: ev.versionB,
-      },
-      provenance: ev.provenance ?? null,
-    }));
+    analysis.possibleContradictionsEvidence.map((ev) => {
+      const meta = describeContradiction(ev);
+      return {
+        type: "contradiction" as const,
+        summary: ev.summary,
+        reason: meta.reason,
+        reasonDetail: meta.reasonDetail,
+        confidence: meta.confidence,
+        priorLineFound: meta.priorLineFound,
+        evidence: {
+          anchors: ev.anchors,
+          before: ev.versionA,
+          after: ev.versionB,
+          priorLineUnavailableText: meta.priorLineFound ? null : NO_PRIOR_LINE_TEXT,
+        },
+        provenance: ev.provenance ?? null,
+      };
+    });
 
   const conceptRenames: ConceptRenameFinding[] =
     analysis.renamedIdeas.map((r) => ({

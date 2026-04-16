@@ -1,5 +1,6 @@
 import { CategoryCard } from "./CategoryCard";
 import type { AnalysisResult } from "../analysis/types";
+import { describeContradiction, NO_PRIOR_LINE_TEXT } from "../analysis/heuristics";
 
 type ResultsPanelProps = {
   result: AnalysisResult | null;
@@ -160,17 +161,48 @@ export function ResultsPanel({ result, hasInput, feedbackUrl }: ResultsPanelProp
           hasItems={result.possibleContradictions.length > 0}
         >
           <ul className="result-list evidence-list">
-            {result.possibleContradictionsEvidence.map((item) => (
-              <li key={item.summary}>
-                <div>{item.summary}</div>
-                <div className="evidence-block">
-                  <span className="evidence-label">Why this fired</span>
-                  <p>Anchors: {item.anchors.join(", ")}</p>
-                  <p>A: {item.versionA}</p>
-                  <p>B: {item.versionB}</p>
-                </div>
-              </li>
-            ))}
+            {result.possibleContradictionsEvidence.map((item) => {
+              const meta = describeContradiction(item);
+              return (
+                <li key={item.summary}>
+                  <div>{item.summary}</div>
+                  <div className="evidence-block">
+                    <span className="evidence-label">Why this fired</span>
+                    <p>
+                      <strong>NEW LINE:</strong> {item.versionB}
+                    </p>
+                    {meta.priorLineFound ? (
+                      <p>
+                        <strong>PRIOR LINE:</strong> {item.versionA}
+                      </p>
+                    ) : (
+                      <>
+                        <p>
+                          <strong>PRIOR LINE:</strong>{" "}
+                          <em>{NO_PRIOR_LINE_TEXT}</em>
+                        </p>
+                        <p className="evidence-muted">
+                          matched against: {item.versionA}
+                        </p>
+                      </>
+                    )}
+                    <p>
+                      <strong>REASON:</strong> <code>{meta.reason}</code> —{" "}
+                      {meta.reasonDetail}
+                    </p>
+                    <p>
+                      <strong>CONFIDENCE:</strong>{" "}
+                      <span className={`tag tag-${meta.confidence}`}>
+                        {meta.confidence.toUpperCase()}
+                      </span>
+                    </p>
+                    {item.anchors.length > 0 && (
+                      <p>Anchors: {item.anchors.join(", ")}</p>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         </CategoryCard>
       </div>

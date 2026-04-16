@@ -1,5 +1,6 @@
 import type { AnalysisResult, FindingProvenance } from "../analysis/types";
 import { formatProvenance } from "../analysis/provenance";
+import { describeContradiction, NO_PRIOR_LINE_TEXT } from "../analysis/heuristics";
 
 const RESET = "\x1b[0m";
 const BOLD = "\x1b[1m";
@@ -95,12 +96,23 @@ export function formatCliOutput(
     hasFindings = true;
     lines.push(c(BOLD + YELLOW, "POSSIBLE CONTRADICTIONS"));
     for (const ev of result.possibleContradictionsEvidence) {
+      const meta = describeContradiction(ev);
       lines.push(`  ${c(RED, "! " + ev.summary)}`);
+      lines.push(`      ${c(BOLD, "NEW LINE:   ")}${truncate(ev.versionB, 100)}`);
+      if (meta.priorLineFound) {
+        lines.push(`      ${c(BOLD, "PRIOR LINE: ")}${truncate(ev.versionA, 100)}`);
+      } else {
+        lines.push(`      ${c(BOLD, "PRIOR LINE: ")}${c(DIM, NO_PRIOR_LINE_TEXT)}`);
+        lines.push(`      ${c(DIM, "            matched against: " + truncate(ev.versionA, 80))}`);
+      }
+      lines.push(`      ${c(BOLD, "REASON:     ")}${meta.reason} — ${c(DIM, meta.reasonDetail)}`);
+      const confColor = meta.confidence === "high" ? RED : meta.confidence === "medium" ? YELLOW : GREEN;
+      lines.push(`      ${c(BOLD, "CONFIDENCE: ")}${c(confColor, meta.confidence.toUpperCase())}`);
       const extras: string[] = [];
       if (ev.anchors.length > 0) extras.push("anchors: " + ev.anchors.join(", "));
       const a = anchorSuffix(ev.provenance);
       if (a) extras.push(a);
-      if (extras.length) lines.push(`    ${c(DIM, extras.join("  "))}`);
+      if (extras.length) lines.push(`      ${c(DIM, extras.join("  "))}`);
     }
     lines.push("");
   }

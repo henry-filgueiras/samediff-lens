@@ -203,9 +203,21 @@ export function buildSarifLog(result: DiffResult, options: SarifOptions = {}): S
   }
 
   for (const f of result.findings.contradictions) {
-    results.push(
-      makeResult("contradiction", f.summary, f.provenance, beforeUri, afterUri, "after"),
-    );
+    const priorPart = f.priorLineFound
+      ? `PRIOR: ${trim(f.evidence.before, 120)}`
+      : `PRIOR: ${f.evidence.priorLineUnavailableText ?? "not found"}`;
+    const msg =
+      `[${f.reason}, confidence=${f.confidence}] ${f.summary} ` +
+      `| NEW: ${trim(f.evidence.after, 120)} | ${priorPart}`;
+    const r = makeResult("contradiction", msg, f.provenance, beforeUri, afterUri, "after");
+    r.properties = {
+      ...(r.properties ?? {}),
+      reason: f.reason,
+      reasonDetail: f.reasonDetail,
+      confidence: f.confidence,
+      priorLineFound: f.priorLineFound,
+    };
+    results.push(r);
   }
 
   for (const f of result.findings.conceptRenames) {

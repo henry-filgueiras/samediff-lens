@@ -75,7 +75,21 @@ export function renderComment(index) {
     lines.push("### Contradictions (blocking)");
     lines.push("");
     for (const item of contradictions.slice(0, MAX_PER_CATEGORY)) {
-      lines.push(`- ${fileTag(item.path)} — ${escape(item.summary)} ${anchorTag(item)}`);
+      const confTag = item.confidence ? ` _[${item.confidence}]_` : "";
+      lines.push(
+        `- ${fileTag(item.path)} — ${escape(item.summary)}${confTag} ${anchorTag(item)}`,
+      );
+      if (item.newLine) {
+        lines.push(`    - **NEW LINE:** ${escape(item.newLine)}`);
+      }
+      if (item.priorLineFound === false && item.priorLineUnavailableText) {
+        lines.push(`    - **PRIOR LINE:** _${escape(item.priorLineUnavailableText)}_`);
+      } else if (item.priorLine) {
+        lines.push(`    - **PRIOR LINE:** ${escape(item.priorLine)}`);
+      }
+      if (item.reason) {
+        lines.push(`    - **REASON:** \`${escape(item.reason)}\``);
+      }
     }
     if (contradictions.length > MAX_PER_CATEGORY) {
       lines.push(`- _…and ${contradictions.length - MAX_PER_CATEGORY} more — see SARIF_`);

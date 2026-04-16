@@ -5,6 +5,7 @@ import type {
   ContradictionEvidence,
   RenamedIdea,
 } from "../analysis/types";
+import { describeContradiction, NO_PRIOR_LINE_TEXT } from "../analysis/heuristics";
 
 type ReportOptions = {
   generatedAt?: string;
@@ -181,12 +182,20 @@ function appendContradictionSection(
   }
 
   evidenceItems.forEach((item) => {
+    const meta = describeContradiction(item);
     lines.push(`- ${item.summary}`);
-    if (item.anchors.length > 0) {
-      lines.push(`  Anchors: ${item.anchors.join(", ")}`);
+    lines.push(`  - **NEW LINE:** ${item.versionB}`);
+    if (meta.priorLineFound) {
+      lines.push(`  - **PRIOR LINE:** ${item.versionA}`);
+    } else {
+      lines.push(`  - **PRIOR LINE:** _${NO_PRIOR_LINE_TEXT}_`);
+      lines.push(`    - matched against: ${item.versionA}`);
     }
-    lines.push(`  A: ${item.versionA}`);
-    lines.push(`  B: ${item.versionB}`);
+    lines.push(`  - **REASON:** \`${meta.reason}\` — ${meta.reasonDetail}`);
+    lines.push(`  - **CONFIDENCE:** ${meta.confidence.toUpperCase()}`);
+    if (item.anchors.length > 0) {
+      lines.push(`  - Anchors: ${item.anchors.join(", ")}`);
+    }
   });
 
   lines.push("");
