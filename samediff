@@ -1,7 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Remember where the user ran us from, so relative paths work
+ORIG_DIR="$(pwd)"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Resolve file arguments to absolute paths before cd-ing into the repo
+resolved_args=()
+for arg in "$@"; do
+  if [[ "$arg" == -* ]]; then
+    resolved_args+=("$arg")
+  elif [[ "$arg" == /* ]]; then
+    resolved_args+=("$arg")
+  else
+    resolved_args+=("$ORIG_DIR/$arg")
+  fi
+done
+
 cd "$SCRIPT_DIR"
 
 # Build if dist-cli is missing or stale
@@ -9,4 +24,4 @@ if [ ! -f dist-cli/cli/index.js ] || [ src/cli/index.ts -nt dist-cli/cli/index.j
   bash tools/build-cli.sh >&2
 fi
 
-exec node dist-cli/cli/index.js "$@"
+exec node dist-cli/cli/index.js "${resolved_args[@]}"
