@@ -59,9 +59,119 @@ The core analysis engine in `src/analysis/` is shared between both surfaces. It 
 **Example spectrum (examples/):**
 01-modal-shift → 02-todo-drift → 03-api-contract → 04-prompt-policy → 05-hydra-doc-drift
 
-**Test counts:** 20 engine tests + 100 CLI integration tests + 19 PR-reviewer tests, all passing
+**Test counts:** 26 engine tests + 100 CLI integration tests + 19 PR-reviewer tests, all passing
 
 ## Devlog
+
+### 2026-04-16 (session 8b) — Contradiction false-positive filters
+
+The very first live-ish run of the PR reviewer (session 8, dogfood branch
+against main) exposed a class of false positives the contradiction heuristic
+had been quietly producing all along: `docs/v0-contract.md` compared against
+itself produced three contradictions. A file is not supposed to contradict
+itself. That is the whole point of a diff tool.
+
+Three stacked filters, each addressing a different FP class:
+
+1. **Identity-invariance guard.** If both sentences of a candidate
+   contradiction pair also appear verbatim on the opposite side, the
+   "contradiction" is an artifact of intra-file structure (a title
+   anchoring a prose negation; a narrowing bullet label elsewhere in
+   the same doc) — not drift between versions. `samediff file.md
+   file.md` now returns zero contradictions by construction. Lives in
+   `detectPossibleContradictions` via per-side raw-unit sets; runs
+   before the top-3 cap so it doesn't hide legit findings.
+
+2. **Claim-shape guard.** Markdown headings (`raw.startsWith("#")`),
+   HTML-only lines (`raw.startsWith("<")`), and short label fragments
+   (< 4 content tokens, no commitment/action/directive signal) are
+   excluded from contradiction cross-matching. A heading is a topic
+   pointer, not a proposition; pairing `# SameDiff Lens v0 Contract`
+   with a later clause about "v0" was generating the loudest FPs.
+
+3. **Topical-overlap guard.** A contradiction requires the two
+   sentences to be about the same topic, measured by Jaccard on
+   content tokens. Threshold is 0.10 (slightly below matchUnits'
+   0.12) — legit `required`↔`optional` flips often live in short
+   sentences that share exactly one anchor (jaccard ≈ 0.11), and we
+   want to keep those. The FP pair "big prose paragraph vs. five-token
+   bullet label" scores ~0.04 and is suppressed.
+
+**Tests added (6, all passing):**
+
+- `multi-section identity self-compare produces no contradictions` —
+  regression guard reproducing the exact dogfood pattern that broke.
+- `drift-invariance suppression keeps real contradictions` — prose
+  pair with a required↔optional flip must survive suppression.
+- `drift-invariance suppression only fires when BOTH sides share the
+  pair` — one-sided removal of a conflicting claim still fires.
+- `markdown headings do not anchor contradictions against prose`.
+- `HTML-only lines do not anchor contradictions`.
+- `low-overlap pairs do not fire contradictions on coincidental
+  buzzwords` — the "local" in "local storage" vs "local bug" case.
+
+**Dogfood measurement (the reason for this session):**
+
+Same PR, same files, before vs. after the filters:
+
+| File | Contradictions before | Contradictions after |
+| --- | --- | --- |
+| `docs/v0-contract.md` | 3 | **0** |
+| `README.md` | 3 | 3 |
+| `DIRECTORS_NOTES.md` | 3 | 3 |
+| **Total** | **9** | **6** |
+
+`v0-contract.md` drops to zero. `README.md` and `DIRECTORS_NOTES.md`
+stay at three each — but that's the slice(0, 3) cap talking; underlying
+pair quality improved (headings no longer anchor findings, coincidental
+buzzwords no longer anchor findings, identity-compare cases are gone).
+
+**What the residual FPs look like (deferred work):**
+
+The three-per-file residual on README/DIRECTORS_NOTES is a *different*
+class of false positive: negation-flip asymmetry on topically-related
+but compatible sentences. Example:
+
+- A: "SameDiff Lens surfaces commitment shifts, task drift, concept
+  renames, and possible contradictions."
+- B: "Commitment shifts, concept renames, action-item drift are
+  reported but do not block."
+
+Both sentences are about the drift categories (topical overlap ~0.19).
+A has no negation marker; B has "not" (in "do not block"). The
+NEGATION-FLIP rule fires — but the two sentences don't actually
+contradict. "Surfaces" and "reported" are compatible. The "do not
+block" is gating behavior, not a flip of A's claim.
+
+Closing this class requires the negation check to know whether the
+negation is *attached to the shared anchor*, not merely present
+anywhere in the sentence. That is NLP-adjacent work (dependency-ish
+reasoning over sentence structure) and sits in its own session. In
+the meantime the `advisory` / `strict` / `adoption` policies can all
+be used to tune how aggressively this fires in CI.
+
+**Key decisions & why:**
+
+- **Ship narrow, well-tested filters; defer the deeper rule rewrite.**
+  Each filter targets a specific, reproducible FP class with a
+  visible test. The negation-flip rule rewrite is a bigger quest and
+  doesn't belong in a calibration session.
+
+- **Filter inside `detectPossibleContradictions`, not post-hoc.** The
+  heuristic caps output at 3; post-hoc suppression would risk hiding
+  legit contradictions behind FPs. Filtering during the cross-product
+  respects the cap.
+
+- **Jaccard threshold 0.10, not 0.12.** Slightly below matchUnits on
+  purpose: legit `required`↔`optional` flips often share exactly one
+  anchor in short sentences (jaccard ≈ 0.11). Breaking the
+  01-modal-shift golden example would've been a worse regression than
+  leaving a small gap below the matchUnits threshold.
+
+- **Claim-shape treats markdown + HTML as structural.** Both are
+  present in every README in this repo; both generated real FPs in
+  the live dogfood run. The heuristic remains pure prose-first but
+  now declines to cross-match against obviously non-prose units.
 
 ### 2026-04-16 (session 8) — PR semantic reviewer (dogfood loop)
 
