@@ -1,0 +1,125 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 340" fill="none" role="img"
+     aria-labelledby="ig-title ig-desc"
+     font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif">
+  <title id="ig-title">SameDiff Lens overview</title>
+  <desc id="ig-desc">A horizontal flow with three stages. Left: two document panels labeled Before and After, with changed lines highlighted in amber. Middle: a circular lens containing aligned and drifted content lines, with category names beneath. Right: a findings panel listing structured drift findings (concept added, todo removed, commitment narrowed, possible contradiction), a drift score bar at 6.2 out of 10, and a baseline-aware "3 new" indicator.</desc>
+
+  <!-- ===================== Stage titles ===================== -->
+  <g font-size="15" font-weight="600" fill="#e5e7eb">
+    <text x="140" y="32" text-anchor="middle">Compare two versions</text>
+    <text x="450" y="32" text-anchor="middle">Detect semantic drift</text>
+    <text x="750" y="32" text-anchor="middle">Structured findings</text>
+  </g>
+
+  <!-- ===================== Stage 1: Before / After ===================== -->
+  <g stroke="#e5e7eb" stroke-width="2">
+    <rect x="40"  y="58" width="90" height="220" rx="6" />
+    <rect x="150" y="58" width="90" height="220" rx="6" />
+  </g>
+
+  <!-- Before content lines -->
+  <g stroke="#9ca3af" stroke-width="2" stroke-linecap="round">
+    <line x1="52" y1="82"  x2="118" y2="82"/>
+    <line x1="52" y1="100" x2="110" y2="100"/>
+    <line x1="52" y1="118" x2="118" y2="118"/>
+    <line x1="52" y1="136" x2="102" y2="136"/>
+    <line x1="52" y1="154" x2="118" y2="154"/>
+    <line x1="52" y1="172" x2="108" y2="172"/>
+    <line x1="52" y1="190" x2="118" y2="190"/>
+    <line x1="52" y1="208" x2="94"  y2="208"/>
+    <line x1="52" y1="226" x2="116" y2="226"/>
+    <line x1="52" y1="244" x2="118" y2="244"/>
+  </g>
+
+  <!-- After content: most lines match, two are highlighted as changed -->
+  <rect x="155" y="128" width="80" height="16" rx="3" fill="#fbbf24" fill-opacity="0.18"/>
+  <rect x="155" y="182" width="80" height="16" rx="3" fill="#fbbf24" fill-opacity="0.18"/>
+  <g stroke="#9ca3af" stroke-width="2" stroke-linecap="round">
+    <line x1="162" y1="82"  x2="228" y2="82"/>
+    <line x1="162" y1="100" x2="220" y2="100"/>
+    <line x1="162" y1="118" x2="228" y2="118"/>
+    <!-- changed (shorter, amber) -->
+    <line x1="162" y1="136" x2="200" y2="136" stroke="#fbbf24"/>
+    <line x1="162" y1="154" x2="220" y2="154"/>
+    <line x1="162" y1="172" x2="228" y2="172"/>
+    <!-- added (amber) -->
+    <line x1="162" y1="190" x2="214" y2="190" stroke="#fbbf24"/>
+    <line x1="162" y1="208" x2="228" y2="208"/>
+    <line x1="162" y1="226" x2="210" y2="226"/>
+    <line x1="162" y1="244" x2="226" y2="244"/>
+  </g>
+
+  <!-- Panel labels -->
+  <g font-size="13" fill="#9ca3af">
+    <text x="85"  y="296" text-anchor="middle">Before</text>
+    <text x="195" y="296" text-anchor="middle">After</text>
+  </g>
+
+  <!-- ===================== Connector 1 ===================== -->
+  <g fill="#e5e7eb" stroke="#e5e7eb" stroke-width="1.5">
+    <line x1="250" y1="168" x2="388" y2="168" stroke-linecap="round"/>
+    <polygon points="395,168 384,163 384,173" stroke="none"/>
+  </g>
+
+  <!-- ===================== Stage 2: Lens ===================== -->
+  <circle cx="450" cy="168" r="56" stroke="#e5e7eb" stroke-width="2.5"/>
+  <!-- aligned content line -->
+  <line x1="422" y1="158" x2="478" y2="158" stroke="#e5e7eb" stroke-width="3" stroke-linecap="round" stroke-opacity="0.7"/>
+  <!-- drifted content line (accent) -->
+  <line x1="422" y1="180" x2="462" y2="180" stroke="#fbbf24" stroke-width="3" stroke-linecap="round"/>
+
+  <!-- Categories extracted by the lens -->
+  <g font-size="11" fill="#9ca3af" font-weight="500">
+    <text x="450" y="250" text-anchor="middle">commits · contradictions · concepts · todos</text>
+  </g>
+
+  <!-- ===================== Connector 2 ===================== -->
+  <g fill="#e5e7eb" stroke="#e5e7eb" stroke-width="1.5">
+    <line x1="512" y1="168" x2="632" y2="168" stroke-linecap="round"/>
+    <polygon points="639,168 628,163 628,173" stroke="none"/>
+  </g>
+
+  <!-- ===================== Stage 3: Findings panel ===================== -->
+  <rect x="640" y="58" width="220" height="220" rx="6" stroke="#e5e7eb" stroke-width="2"/>
+  <!-- header -->
+  <path d="M 640,64 a 6,6 0 0 1 6,-6 h 208 a 6,6 0 0 1 6,6 v 22 h -220 z"
+        fill="#e5e7eb" fill-opacity="0.10" stroke="none"/>
+  <line x1="640" y1="86" x2="860" y2="86" stroke="#e5e7eb" stroke-width="1" stroke-opacity="0.25"/>
+  <text x="654" y="77" font-size="13" font-weight="600" fill="#e5e7eb">findings</text>
+
+  <!-- Finding rows -->
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#e5e7eb">
+    <text x="654" y="108">
+      <tspan fill="#34d399" font-weight="700">+ </tspan>
+      <tspan>concept: repo policy</tspan>
+    </text>
+    <text x="654" y="132">
+      <tspan fill="#fca5a5" font-weight="700">− </tspan>
+      <tspan>todo: update baseline</tspan>
+    </text>
+    <text x="654" y="156">
+      <tspan fill="#fbbf24" font-weight="700">~ </tspan>
+      <tspan>commitment narrowed</tspan>
+    </text>
+    <text x="654" y="180">
+      <tspan fill="#fca5a5" font-weight="700">! </tspan>
+      <tspan>possible contradiction</tspan>
+    </text>
+  </g>
+
+  <!-- divider -->
+  <line x1="654" y1="198" x2="846" y2="198" stroke="#e5e7eb" stroke-width="1" stroke-opacity="0.18"/>
+
+  <!-- Score section -->
+  <g font-size="12" fill="#e5e7eb">
+    <text x="654" y="220" font-weight="600">drift score</text>
+    <text x="846" y="220" text-anchor="end" font-weight="700" fill="#fbbf24">6.2 / 10</text>
+  </g>
+  <rect x="654" y="228" width="192" height="6" rx="3" fill="#e5e7eb" fill-opacity="0.18"/>
+  <rect x="654" y="228" width="119" height="6" rx="3" fill="#fbbf24"/>
+
+  <!-- Baseline-aware note + NEW pill -->
+  <text x="654" y="258" font-size="11" fill="#9ca3af">baseline-aware</text>
+  <rect x="788" y="247" width="56" height="16" rx="8" fill="#fbbf24" fill-opacity="0.18" stroke="#fbbf24" stroke-width="1"/>
+  <text x="816" y="259" text-anchor="middle" font-size="10" font-weight="700" fill="#fbbf24">3 NEW</text>
+</svg>

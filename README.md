@@ -13,6 +13,13 @@ A repo can declare a **semantic-drift policy** in `.samediff.json` and enforce i
 
 Feedback on false positives, false negatives, and confusing outputs is welcome via GitHub issues.
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/infographic-overview-dark.svg">
+    <img src="docs/infographic-overview.svg" alt="SameDiff Lens overview: compare two versions, detect semantic drift, report structured findings with a drift score." width="880">
+  </picture>
+</p>
+
 ## Three workflows
 
 SameDiff is designed around three shapes of work. Each has a named path.
