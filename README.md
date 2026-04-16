@@ -11,7 +11,7 @@ npm install && npm run build:cli
 npm run samediff -- examples/01-modal-shift/left.md examples/01-modal-shift/right.md
 ```
 
-Options: `--no-color` for plain text, `--md` for a full Markdown report, `--json` for structured machine-readable output, `--help` for usage.
+Options at a glance: `--md`, `--html`, `--json`, `--compact`, `--github`, `--stats`, `--score`. Use `--help` for the full usage.
 
 There are five example pairs in `examples/`, from simple to advanced — see [examples/README.md](examples/README.md).
 
@@ -24,6 +24,55 @@ npm run samediff -- fileA.md fileB.md --json -o result.json
 ```
 
 The `--json` flag emits a stable, machine-readable representation of the analysis — the canonical result contract that CI integrations, PR comment bots, and future UIs can build on. Only valid JSON is written to stdout; diagnostics go to stderr.
+
+### CI gating: `--fail-on`
+
+Precise exit-code control — no more fighting a fixed threshold:
+
+```bash
+samediff a.md b.md --fail-on score:5               # fail if drift ≥ 5/10
+samediff a.md b.md --fail-on contradictions        # fail on any contradiction
+samediff a.md b.md --fail-on commitment-shifts,contradictions
+samediff a.md b.md --fail-on any                   # fail on any finding
+```
+
+### Gradual adoption: `--baseline`
+
+Snapshot today's drift and only fail on NEW drift from then on:
+
+```bash
+# Record current state once
+samediff --git main -- spec.md --json -o .samediff-baseline.json
+
+# In CI, ignore pre-existing findings — only flag what's new
+samediff --git main -- spec.md \
+  --baseline .samediff-baseline.json \
+  --fail-on any
+```
+
+The baseline is subtracted from both the findings list **and** the drift score, so CI won't yell at you about drift that was already there.
+
+### Focus mode: `--only` / `--exclude`
+
+Filter categories; score and output are recomputed from the filtered view.
+
+```bash
+samediff a.md b.md --only contradictions
+samediff a.md b.md --exclude concepts --compact
+```
+
+Category names: `commitment-shifts`, `contradictions`, `concept-renames`, `added-concepts`, `removed-concepts`, `action-items-added`, `action-items-removed`. Handy aliases: `commits`, `concepts`, `todos`, `all`.
+
+### Pipe-friendly formats
+
+```bash
+samediff a.md b.md --compact          # one finding per line (grep/awk friendly)
+samediff a.md b.md --stats            # one-line key=value counts
+samediff a.md b.md --github           # ::error/warning/notice:: workflow commands
+echo "draft text" | samediff - ref.md # stdin support via '-'
+```
+
+`--github` emits GitHub Actions workflow commands so findings show up inline in PR checks with zero extra tooling.
 
 ## Browser UI
 

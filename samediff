@@ -5,10 +5,45 @@ set -euo pipefail
 ORIG_DIR="$(pwd)"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# Resolve file arguments to absolute paths before cd-ing into the repo
+# Flags that take a value on the next arg. Their values must NOT be
+# path-resolved (they're category names, specs, etc.) — except -o/--out
+# and --baseline whose values ARE paths.
+VALUE_FLAGS_NONPATH=("--only" "--exclude" "--fail-on")
+VALUE_FLAGS_PATH=("-o" "--out" "--baseline")
+
+is_in() {
+  local needle="$1"; shift
+  for x in "$@"; do [[ "$x" == "$needle" ]] && return 0; done
+  return 1
+}
+
+# Resolve file arguments to absolute paths before cd-ing into the repo.
+# Two classes of value-taking flags: paths (resolve) and non-paths (pass through).
 resolved_args=()
+skip_next_mode=none   # none | path | raw
 for arg in "$@"; do
+  if [[ "$skip_next_mode" == "path" ]]; then
+    if [[ "$arg" == /* || "$arg" == -* ]]; then
+      resolved_args+=("$arg")
+    else
+      resolved_args+=("$ORIG_DIR/$arg")
+    fi
+    skip_next_mode=none
+    continue
+  fi
+  if [[ "$skip_next_mode" == "raw" ]]; then
+    resolved_args+=("$arg")
+    skip_next_mode=none
+    continue
+  fi
   if [[ "$arg" == -* ]]; then
+    resolved_args+=("$arg")
+    if is_in "$arg" "${VALUE_FLAGS_PATH[@]}"; then
+      skip_next_mode=path
+    elif is_in "$arg" "${VALUE_FLAGS_NONPATH[@]}"; then
+      skip_next_mode=raw
+    fi
+  elif [[ "$arg" == "-" ]]; then
     resolved_args+=("$arg")
   elif [[ "$arg" == /* ]]; then
     resolved_args+=("$arg")
@@ -20,7 +55,18 @@ done
 cd "$SCRIPT_DIR"
 
 # Build if dist-cli is missing or stale
-if [ ! -f dist-cli/cli/index.js ] || [ src/cli/index.ts -nt dist-cli/cli/index.js ] || [ src/cli/formatCli.ts -nt dist-cli/cli/index.js ] || [ src/analysis/heuristics.ts -nt dist-cli/cli/index.js ]; then
+rebuild=0
+if [ ! -f dist-cli/cli/index.js ]; then
+  rebuild=1
+else
+  for src in src/cli/*.ts src/analysis/*.ts src/lib/report.ts; do
+    if [ -e "$src" ] && [ "$src" -nt dist-cli/cli/index.js ]; then
+      rebuild=1
+      break
+    fi
+  done
+fi
+if [ "$rebuild" -eq 1 ]; then
   bash tools/build-cli.sh >&2
 fi
 

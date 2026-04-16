@@ -16,10 +16,17 @@ The core analysis engine in `src/analysis/` is shared between both surfaces. It 
 - `--html` — self-contained dark-theme HTML report (sharable, screenshot-worthy)
 - `--md` — full Markdown report
 - `--json` — structured machine-readable output (stable schema, canonical result contract)
+- `--compact` — one finding per line, grep-friendly
+- `--github` — GitHub Actions annotation workflow commands
+- `--stats` — one-line key=value category counts
+- `--score` — numeric drift severity (0–10)
 - `--git HEAD~1 -- file.md` — diff against any git ref
 - `--watch` / `-w` — live re-diff on file changes
-- `--exit-code` — exit 1 if drift detected (CI-ready)
-- `--score` — numeric drift severity (0–10)
+- `-` as filename — read from stdin
+- `--only` / `--exclude` — category focus filters
+- `--baseline <json>` — subtract pre-existing findings; only NEW drift is shown & scored
+- `--fail-on <spec>` — precise CI gating: `any`, `score:N`, or category list (combinable)
+- `--exit-code` — legacy alias for `--fail-on score:1.1`
 - `-o file` — write output to file
 
 **Architecture:**
@@ -36,9 +43,114 @@ The core analysis engine in `src/analysis/` is shared between both surfaces. It 
 **Example spectrum (examples/):**
 01-modal-shift → 02-todo-drift → 03-api-contract → 04-prompt-policy → 05-hydra-doc-drift
 
-**Test counts:** 14 engine tests + 29 CLI integration tests, all passing
+**Test counts:** 14 engine tests + 55 CLI integration tests, all passing
 
 ## Devlog
+
+### 2026-04-16 (session 4) — CI-native developer surface
+
+The CLI already did solid single-run diffing, but for anyone actually adopting it
+on a shared repo, single-run isn't enough. Teams need noise control, gradual
+adoption, and precise gating. That's what this session builds. Version bumped
+to 0.3.0.
+
+**What we built:**
+- `--fail-on <spec>` — replaces the crude `--exit-code` threshold. Spec is
+  comma-separated: `any`, `score:N`, or category names (with aliases like
+  `commits`, `concepts`, `todos`, `all`). Combinable in one flag.
+  `--exit-code` still works, aliased to `--fail-on score:1.1`.
+- `--baseline <file.json>` — the gradual-adoption feature. Load a prior
+  `--json` run, fingerprint every finding, and subtract matches from the
+  current run. Score is recomputed from the filtered view, so pre-existing
+  drift doesn't inflate the score or trip `--fail-on`. Baseline provenance
+  (path + suppressed count) surfaces in `--json` output under `filters.baseline`.
+- `--only <cats>` / `--exclude <cats>` — category filter, comma-separated,
+  with aliases. Works with every output format. Score is recomputed.
+- `--github` — emits GitHub Actions workflow commands (`::error::`,
+  `::warning::`, `::notice::`). Commitment shifts and contradictions are
+  errors; renames are warnings; the rest are notices. Messages are escaped
+  per the workflow-commands spec.
+- `--compact` — one finding per line, tab-separated: `CATEGORY\tdetail`.
+  Grep-, awk-, `wc -l`-friendly.
+- `--stats` — one-line key=value counts (`score=5.8 commitment-shifts=2 …`).
+- stdin support — pass `-` as either filename to read from stdin
+  (`cat draft.md | samediff - reference.md`).
+- Format mutual exclusion — pass two format flags and the CLI errors out
+  cleanly with exit code 2 instead of picking one silently.
+
+**Key decisions:**
+- **Filter pipeline operates on `AnalysisResult`, not `DiffResult`.** This
+  means every existing renderer (terminal, md, html, json) sees the same
+  filtered view without code changes. The alternative — pushing all
+  renderers onto `DiffResult` — would have been a bigger refactor with
+  regression risk. The current design delivers the feature immediately.
+- **Score is recomputed from the filtered result, not the raw one.** This is
+  what lets `--baseline` + `--fail-on score:5` behave the way a developer
+  expects: "fail if NEW drift alone is ≥5". If we kept the raw score, the
+  baseline feature would be half-useful — you'd see the filtered findings
+  but still fail on pre-existing drift.
+- **Summary is also rebuilt from the filtered result** (only when filters
+  actually suppressed something, to avoid unnecessary work). Without this,
+  the footer would still say "found 2 commitment shifts" after `--only
+  contradictions` zeroed them out.
+- **Fingerprints are normalized** (lowercased, whitespace-collapsed) so
+  trivial edits don't break baseline matching. Contradiction anchors are
+  sorted so anchor reordering doesn't break matching either. Fingerprints
+  are intentionally opaque internal identifiers — not part of the public
+  JSON schema.
+- **Baseline JSON loader is lenient** — unknown top-level fields are ignored,
+  missing categories are treated as empty arrays. Future schema evolution
+  won't break old baselines.
+- **`--github` uses `file=` on every annotation** (set to the right-hand
+  file). We don't have line numbers for findings yet (the engine doesn't
+  track source offsets), so GitHub will annotate at file top. That's still
+  useful — it puts the finding in the PR Files tab. Adding real line
+  numbers is a good next step, but needs engine changes.
+- **Exit code 2 for usage errors** (bad --fail-on spec, unknown category,
+  two format flags). Kept exit 1 reserved for "drift detected" so CI scripts
+  can distinguish misconfiguration from real findings.
+- **`--fail-on score:N` is `>=`, not strict `>`.** A developer reading
+  "fail on score 5" naturally expects "5.0 fails." The legacy `--exit-code`
+  (strict `> 1`) is preserved via the `score:1.1` alias.
+- **No config file yet.** Tempting but out of scope for this session —
+  the flag surface is the important thing to get right first. A `.samediffrc`
+  layer on top is easy once the flags are stable.
+
+**Why this matters:**
+Before this session, the CLI could produce a report. Now it's a CI tool:
+- "Gate PRs on contradictions but allow rename churn" → one flag
+- "Start using this on a 5-year-old docs repo without bankruptcy" → baseline
+- "Pipe findings into my existing tooling" → compact + stdin
+- "Light up PR annotations without writing a GitHub Action" → `--github`
+
+The underlying JSON schema didn't need to change; everything composes over
+the existing `DiffResult` contract. The new `filters` field on JSON output
+is additive and optional.
+
+**Tests added (26 new, 55 total CLI):**
+- `--only` / `--exclude` with single, comma-separated, and alias categories
+- Filter recomputes score and respects `--json` output
+- Unknown category exits with code 2
+- `--fail-on any` / `score:N` / category / bad-spec paths
+- `--fail-on contradictions` passes when contradictions are excluded
+- `--baseline` suppresses findings, zeroes score, passes `--fail-on any`
+- `--baseline` with non-JSON file errors cleanly
+- `--compact` format shape, ANSI-free, composes with `--only`
+- `--github` annotation shape and single-line invariant
+- `--stats` one-line format
+- stdin on left, stdin on right, both-stdin error
+- Two-format-flag conflict errors with exit 2
+
+**Paths worth following:**
+- Push existing renderers (terminal, html, md) onto `DiffResult` so they can
+  carry baseline provenance, finding-type discriminators, and schema-versioned
+  guarantees. The groundwork is in place.
+- `--sarif` for code scanning integrations (SARIF 2.1.0 is the lingua franca
+  for security/lint tools on GitHub).
+- Source line tracking through the engine so `--github` can annotate the
+  exact line that changed. This is the biggest unlock for inline PR review UX.
+- Config file (`.samediffrc`) for default flags + per-project ignore lists.
+- Directory-mode: `samediff --dir docs/` to aggregate drift across many files.
 
 ### 2026-04-16 (session 3) — Structured JSON output + canonical result model
 

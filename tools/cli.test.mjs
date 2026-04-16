@@ -347,6 +347,284 @@ test("--json + -o writes JSON to file", () => {
   }
 });
 
+// --- Filter tests (--only / --exclude) ---
+
+test("--only limits output to one category", () => {
+  const output = run(simpleLeft, simpleRight, "--only", "contradictions");
+  assert.match(output, /POSSIBLE CONTRADICTIONS/);
+  assert.doesNotMatch(output, /COMMITMENT SHIFTS/);
+  assert.doesNotMatch(output, /ADDED CONCEPTS/);
+});
+
+test("--only accepts comma-separated categories", () => {
+  const output = run(simpleLeft, simpleRight, "--only", "commitment-shifts,contradictions");
+  assert.match(output, /COMMITMENT SHIFTS/);
+  assert.match(output, /POSSIBLE CONTRADICTIONS/);
+  assert.doesNotMatch(output, /ADDED CONCEPTS/);
+});
+
+test("--only alias 'concepts' covers added + removed", () => {
+  const output = run(simpleLeft, simpleRight, "--only", "concepts");
+  assert.match(output, /ADDED CONCEPTS/);
+  assert.match(output, /REMOVED CONCEPTS/);
+  assert.doesNotMatch(output, /COMMITMENT SHIFTS/);
+});
+
+test("--exclude hides specified categories", () => {
+  const output = run(simpleLeft, simpleRight, "--exclude", "concepts");
+  assert.match(output, /COMMITMENT SHIFTS/);
+  assert.doesNotMatch(output, /ADDED CONCEPTS/);
+  assert.doesNotMatch(output, /REMOVED CONCEPTS/);
+});
+
+test("--only with unknown category exits with error", () => {
+  try {
+    run(simpleLeft, simpleRight, "--only", "bogus-category");
+    assert.fail("Expected error for unknown category");
+  } catch (err) {
+    assert.equal(err.status, 2);
+    assert.match(err.stderr ?? err.message, /Unknown category/);
+  }
+});
+
+test("--only changes the score (recomputed from filtered findings)", () => {
+  const full = parseFloat(run(simpleLeft, simpleRight, "--score").trim());
+  const filtered = parseFloat(
+    run(simpleLeft, simpleRight, "--only", "contradictions", "--score").trim(),
+  );
+  assert.ok(filtered < full, `Expected filtered score (${filtered}) < full score (${full})`);
+});
+
+test("--json respects --only", () => {
+  const output = run(simpleLeft, simpleRight, "--only", "contradictions", "--json");
+  const result = JSON.parse(output);
+  assert.equal(result.counts.commitmentShifts, 0);
+  assert.equal(result.counts.addedConcepts, 0);
+  assert.ok(result.counts.contradictions >= 1);
+});
+
+// --- --fail-on tests ---
+
+test("--fail-on any returns 1 on drifted files", () => {
+  try {
+    execFileSync("node", [cli, simpleLeft, simpleRight, "--fail-on", "any"], {
+      cwd: repoRoot,
+      encoding: "utf-8",
+      env: { ...process.env, NO_COLOR: "1" },
+    });
+    assert.fail("Expected non-zero exit");
+  } catch (err) {
+    assert.equal(err.status, 1);
+    assert.match(err.stderr ?? err.message, /--fail-on any/);
+  }
+});
+
+test("--fail-on score:5 fails when score >= 5", () => {
+  try {
+    execFileSync("node", [cli, simpleLeft, simpleRight, "--fail-on", "score:5"], {
+      cwd: repoRoot,
+      encoding: "utf-8",
+      env: { ...process.env, NO_COLOR: "1" },
+    });
+    assert.fail("Expected exit 1");
+  } catch (err) {
+    assert.equal(err.status, 1);
+    assert.match(err.stderr ?? err.message, /drift score.*≥ 5/);
+  }
+});
+
+test("--fail-on score:9 passes when score < 9", () => {
+  // Shouldn't throw
+  execFileSync("node", [cli, simpleLeft, simpleRight, "--fail-on", "score:9"], {
+    cwd: repoRoot,
+    encoding: "utf-8",
+    env: { ...process.env, NO_COLOR: "1" },
+  });
+});
+
+test("--fail-on contradictions fails when contradictions exist", () => {
+  try {
+    execFileSync("node", [cli, simpleLeft, simpleRight, "--fail-on", "contradictions"], {
+      cwd: repoRoot,
+      encoding: "utf-8",
+      env: { ...process.env, NO_COLOR: "1" },
+    });
+    assert.fail("Expected exit 1");
+  } catch (err) {
+    assert.equal(err.status, 1);
+    assert.match(err.stderr ?? err.message, /contradictions/);
+  }
+});
+
+test("--fail-on contradictions passes when that category is excluded", () => {
+  execFileSync(
+    "node",
+    [cli, simpleLeft, simpleRight, "--exclude", "contradictions", "--fail-on", "contradictions"],
+    { cwd: repoRoot, encoding: "utf-8", env: { ...process.env, NO_COLOR: "1" } },
+  );
+});
+
+test("--fail-on bad spec exits with code 2", () => {
+  try {
+    run(simpleLeft, simpleRight, "--fail-on", "score:not-a-number");
+    assert.fail("Expected error");
+  } catch (err) {
+    assert.equal(err.status, 2);
+  }
+});
+
+// --- --baseline tests ---
+
+test("--baseline suppresses findings already present", () => {
+  const tmpDir = mkdtempSync(resolve(tmpdir(), "samediff-baseline-"));
+  const baselinePath = resolve(tmpDir, "baseline.json");
+  try {
+    // Snapshot current run
+    const baseline = run(simpleLeft, simpleRight, "--json");
+    writeFileSync(baselinePath, baseline);
+
+    // Re-run with baseline: should see zero findings
+    const second = run(simpleLeft, simpleRight, "--baseline", baselinePath, "--json");
+    const result = JSON.parse(second);
+    assert.equal(result.counts.total, 0, "All pre-existing findings should be suppressed");
+    assert.equal(result.score.value, 0);
+    assert.ok(result.filters?.baseline, "Baseline provenance should be in result.filters");
+    assert.ok(result.filters.baseline.suppressed > 0);
+  } finally {
+    rmSync(tmpDir, { force: true, recursive: true });
+  }
+});
+
+test("--baseline + --fail-on any exits 0 when nothing new", () => {
+  const tmpDir = mkdtempSync(resolve(tmpdir(), "samediff-baseline2-"));
+  const baselinePath = resolve(tmpDir, "baseline.json");
+  try {
+    writeFileSync(baselinePath, run(simpleLeft, simpleRight, "--json"));
+    execFileSync(
+      "node",
+      [cli, simpleLeft, simpleRight, "--baseline", baselinePath, "--fail-on", "any"],
+      { cwd: repoRoot, encoding: "utf-8", env: { ...process.env, NO_COLOR: "1" } },
+    );
+  } finally {
+    rmSync(tmpDir, { force: true, recursive: true });
+  }
+});
+
+test("--baseline with non-JSON file errors cleanly", () => {
+  const tmpDir = mkdtempSync(resolve(tmpdir(), "samediff-baseline3-"));
+  const bogusPath = resolve(tmpDir, "bogus.json");
+  try {
+    writeFileSync(bogusPath, "not json at all");
+    try {
+      run(simpleLeft, simpleRight, "--baseline", bogusPath);
+      assert.fail("Expected error");
+    } catch (err) {
+      assert.equal(err.status, 2);
+      assert.match(err.stderr ?? err.message, /not valid JSON|no .findings/i);
+    }
+  } finally {
+    rmSync(tmpDir, { force: true, recursive: true });
+  }
+});
+
+// --- --compact tests ---
+
+test("--compact emits one finding per line", () => {
+  const output = run(simpleLeft, simpleRight, "--compact");
+  const lines = output.trim().split("\n").filter(Boolean);
+  assert.ok(lines.length >= 3, `Expected multiple finding lines, got ${lines.length}`);
+  for (const line of lines) {
+    assert.match(line, /^(COMMITMENT|CONTRADICTION|RENAME|ADDED|REMOVED|TODO\+|TODO-)\t/);
+  }
+});
+
+test("--compact output has no ANSI or banners", () => {
+  const output = runRaw(simpleLeft, simpleRight, "--compact");
+  assert.ok(!/\x1b\[/.test(output), "Compact output must have no ANSI codes");
+  assert.doesNotMatch(output, /SameDiff Summary/);
+});
+
+test("--compact + --only filters together", () => {
+  const output = run(simpleLeft, simpleRight, "--compact", "--only", "commitment-shifts");
+  const lines = output.trim().split("\n").filter(Boolean);
+  assert.ok(lines.length > 0);
+  for (const line of lines) {
+    assert.ok(line.startsWith("COMMITMENT\t"), `Non-commitment line slipped through: ${line}`);
+  }
+});
+
+// --- --github tests ---
+
+test("--github emits workflow annotation commands", () => {
+  const output = run(simpleLeft, simpleRight, "--github");
+  assert.match(output, /^::(error|warning|notice) /m);
+  assert.match(output, /title=Commitment shift/);
+});
+
+test("--github escapes newlines and colons in messages", () => {
+  const output = run(simpleLeft, simpleRight, "--github");
+  // Each annotation must be on a single physical line
+  for (const line of output.split("\n").filter(Boolean)) {
+    assert.ok(line.startsWith("::"), `Stray line: ${line}`);
+  }
+});
+
+// --- --stats tests ---
+
+test("--stats emits one-line key=value summary", () => {
+  const output = run(simpleLeft, simpleRight, "--stats").trim();
+  const lines = output.split("\n");
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /score=\d+\.\d+/);
+  assert.match(lines[0], /commitment-shifts=\d+/);
+  assert.match(lines[0], /contradictions=\d+/);
+});
+
+// --- stdin tests ---
+
+test("stdin via `-` reads the left file", () => {
+  const leftText = readFileSync(simpleLeft, "utf-8");
+  const output = execFileSync("node", [cli, "-", simpleRight, "--stats"], {
+    cwd: repoRoot,
+    encoding: "utf-8",
+    env: { ...process.env, NO_COLOR: "1" },
+    input: leftText,
+  });
+  assert.match(output, /commitment-shifts=2/);
+});
+
+test("stdin via `-` reads the right file", () => {
+  const rightText = readFileSync(simpleRight, "utf-8");
+  const output = execFileSync("node", [cli, simpleLeft, "-", "--stats"], {
+    cwd: repoRoot,
+    encoding: "utf-8",
+    env: { ...process.env, NO_COLOR: "1" },
+    input: rightText,
+  });
+  assert.match(output, /commitment-shifts=2/);
+});
+
+test("two `-` args is an error", () => {
+  try {
+    run("-", "-");
+    assert.fail("Expected error for two stdin args");
+  } catch (err) {
+    assert.equal(err.status, 1);
+  }
+});
+
+// --- format mutual-exclusion ---
+
+test("passing two format flags is an error", () => {
+  try {
+    run(simpleLeft, simpleRight, "--json", "--compact");
+    assert.fail("Expected error");
+  } catch (err) {
+    assert.equal(err.status, 2);
+    assert.match(err.stderr ?? err.message, /at most one output format/);
+  }
+});
+
 test("--json schema shape is stable (snapshot fields)", () => {
   const output = run(simpleLeft, simpleRight, "--json");
   const result = JSON.parse(output);

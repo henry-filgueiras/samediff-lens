@@ -142,7 +142,7 @@ export type BuildResultOptions = {
   toolVersion?: string;
 };
 
-const TOOL_VERSION = "0.2.0";
+const TOOL_VERSION = "0.3.0";
 
 export function buildDiffResult(
   analysis: AnalysisResult,
