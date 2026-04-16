@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR"
+
+# Build if dist-cli is missing or stale
+if [ ! -f dist-cli/cli/index.js ] || [ src/cli/index.ts -nt dist-cli/cli/index.js ] || [ src/cli/formatCli.ts -nt dist-cli/cli/index.js ] || [ src/analysis/heuristics.ts -nt dist-cli/cli/index.js ]; then
+  bash tools/build-cli.sh >&2
+fi
+
+exec node dist-cli/cli/index.js "$@"
