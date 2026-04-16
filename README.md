@@ -9,7 +9,7 @@
 
 SameDiff Lens surfaces the kinds of semantic changes that raw line diff misses: commitment shifts, task drift, concept renames, and possible contradictions. No LLMs, no cloud, no embeddings — just deterministic heuristics you can inspect.
 
-A repo can declare a **semantic-drift policy** in `.samediff.json` and enforce it consistently in CI and local workflows.
+A repo must declare a **semantic-drift policy** in `.samediff.json` and enforce it consistently in CI and local workflows.
 
 Feedback on false positives, false negatives, and confusing outputs is welcome via GitHub issues.
 
