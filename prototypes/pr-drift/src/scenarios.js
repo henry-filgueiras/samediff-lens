@@ -43,6 +43,20 @@ module.exports = [
   },
 
   {
+    name: 'typo-ships-a-feature',
+    description:
+      '"Fix typo in README" that quietly ships a whole new module and an unrelated CI tweak. ' +
+      'Dogfood case — lifted from a real drifted commit on this repo.',
+    title: 'fix: typo in README',
+    body: 'Tiny README cleanup.',
+    files: [
+      { status: 'modify', path: 'README.md',                                added: 1,  deleted: 1 },
+      { status: 'add',    path: 'src/lib/cache.ts',                         added: 51, deleted: 0 },
+      { status: 'modify', path: '.github/workflows/pr-semantic-review.yml', added: 3,  deleted: 0 },
+    ],
+  },
+
+  {
     name: 'bugfix-sprawl',
     description: 'A "small fix" that somehow touches four unrelated domains.',
     title: 'fix: dashboard crash on empty state',

@@ -18,6 +18,7 @@ const CONVENTIONAL_PREFIX = {
   feat: 'feature', feature: 'feature',
   refactor: 'refactor',
   chore: 'chore',
+  ci: 'chore', build: 'chore', perf: 'chore', style: 'chore',
   docs: 'docs',
   test: 'test', tests: 'test',
 };
