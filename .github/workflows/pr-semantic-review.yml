@@ -21,17 +21,15 @@ name: SameDiff Lens PR review
 on:
   pull_request:
     types: [opened, synchronize, reopened]
-    # Only run when files that could plausibly be allowlisted actually
-    # change. This is a coarse filter — select-files.mjs still enforces
-    # the authoritative allowlist, but this short-circuits no-op runs.
-    paths:
-      - 'README.md'
-      - 'DIRECTORS_NOTES.md'
-      - 'LAUNCH_NOTES.md'
-      - 'docs/**/*.md'
-      - 'docs/**/*.markdown'
-      - 'tools/pr-review/**'
-      - '.github/workflows/pr-semantic-review.yml'
+    # Deliberately NO `paths:` filter. A paths gate on `pull_request`
+    # decides whether the workflow runs at all for a synchronize event —
+    # if a follow-up push touches only source files, the workflow would
+    # skip and the sticky comment would stay frozen on its last run's
+    # complaints. We prefer a slightly wasteful always-run: when no
+    # allowlisted files changed, select-files.mjs returns empty and the
+    # "Produce no-op index when nothing was selected" step below feeds a
+    # graceful empty-state through the normal upsert path, so the sticky
+    # stays coherent with PR head on every push.
 
 permissions:
   contents: read
