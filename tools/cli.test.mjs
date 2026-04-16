@@ -181,3 +181,201 @@ test("--git with missing ref gives clean error", () => {
     assert.match(err.stderr ?? err.message, /cannot read|Failed to read/i);
   }
 });
+
+// --- JSON output tests ---
+
+test("--json emits valid parseable JSON", () => {
+  const output = run(beforeFile, afterFile, "--json");
+  let parsed;
+  assert.doesNotThrow(() => {
+    parsed = JSON.parse(output);
+  }, "Expected valid JSON output");
+  assert.ok(typeof parsed === "object" && parsed !== null);
+});
+
+test("--json includes required top-level fields", () => {
+  const output = run(beforeFile, afterFile, "--json");
+  const result = JSON.parse(output);
+
+  // Schema version
+  assert.ok("version" in result, "Missing 'version' field");
+  assert.equal(result.version, "1");
+
+  // Meta
+  assert.ok("meta" in result, "Missing 'meta' field");
+  assert.equal(result.meta.tool, "samediff-lens");
+  assert.ok(result.meta.toolVersion, "Missing toolVersion");
+  assert.equal(result.meta.analysisEngine, "heuristic-v0");
+  assert.ok(result.meta.generatedAt, "Missing generatedAt timestamp");
+
+  // Input
+  assert.ok("input" in result, "Missing 'input' field");
+  assert.ok(result.input.left, "Missing input.left");
+  assert.ok(result.input.right, "Missing input.right");
+  assert.ok(result.input.left.label, "Missing input.left.label");
+  assert.ok(result.input.right.label, "Missing input.right.label");
+
+  // Score
+  assert.ok("score" in result, "Missing 'score' field");
+  assert.equal(typeof result.score.value, "number");
+  assert.ok(result.score.value >= 0 && result.score.value <= 10);
+  assert.ok(["low", "moderate", "high", "critical"].includes(result.score.label));
+  assert.ok([0, 1].includes(result.score.exitCode));
+
+  // Counts
+  assert.ok("counts" in result, "Missing 'counts' field");
+  assert.equal(typeof result.counts.total, "number");
+  assert.equal(typeof result.counts.commitmentShifts, "number");
+  assert.equal(typeof result.counts.contradictions, "number");
+
+  // Findings
+  assert.ok("findings" in result, "Missing 'findings' field");
+  assert.ok(Array.isArray(result.findings.commitmentShifts));
+  assert.ok(Array.isArray(result.findings.contradictions));
+  assert.ok(Array.isArray(result.findings.conceptRenames));
+  assert.ok(Array.isArray(result.findings.addedConcepts));
+  assert.ok(Array.isArray(result.findings.removedConcepts));
+  assert.ok(Array.isArray(result.findings.actionItemsAdded));
+  assert.ok(Array.isArray(result.findings.actionItemsRemoved));
+
+  // Summary
+  assert.ok("summary" in result, "Missing 'summary' field");
+  assert.equal(typeof result.summary, "string");
+});
+
+test("--json score is present for drifted files", () => {
+  const output = run(beforeFile, afterFile, "--json");
+  const result = JSON.parse(output);
+  assert.ok(result.score.value > 0, "Expected positive drift score for hydra example");
+});
+
+test("--json counts match findings array lengths", () => {
+  const output = run(beforeFile, afterFile, "--json");
+  const result = JSON.parse(output);
+  assert.equal(result.counts.commitmentShifts, result.findings.commitmentShifts.length);
+  assert.equal(result.counts.contradictions, result.findings.contradictions.length);
+  assert.equal(result.counts.conceptRenames, result.findings.conceptRenames.length);
+  assert.equal(result.counts.addedConcepts, result.findings.addedConcepts.length);
+  assert.equal(result.counts.removedConcepts, result.findings.removedConcepts.length);
+  assert.equal(result.counts.actionItemsAdded, result.findings.actionItemsAdded.length);
+  assert.equal(result.counts.actionItemsRemoved, result.findings.actionItemsRemoved.length);
+
+  const computedTotal =
+    result.counts.commitmentShifts +
+    result.counts.contradictions +
+    result.counts.conceptRenames +
+    result.counts.addedConcepts +
+    result.counts.removedConcepts +
+    result.counts.actionItemsAdded +
+    result.counts.actionItemsRemoved;
+  assert.equal(result.counts.total, computedTotal, "Total should equal sum of category counts");
+});
+
+test("--json findings have correct type discriminators", () => {
+  const output = run(beforeFile, afterFile, "--json");
+  const result = JSON.parse(output);
+
+  for (const f of result.findings.commitmentShifts) {
+    assert.equal(f.type, "commitment-shift");
+    assert.ok(f.evidence, "commitment-shift missing evidence");
+    assert.ok(f.evidence.before, "commitment-shift missing evidence.before");
+    assert.ok(f.evidence.after, "commitment-shift missing evidence.after");
+    assert.ok(Array.isArray(f.evidence.triggers), "commitment-shift missing triggers array");
+  }
+  for (const f of result.findings.contradictions) {
+    assert.equal(f.type, "contradiction");
+    assert.ok(Array.isArray(f.evidence.anchors));
+  }
+  for (const f of result.findings.conceptRenames) {
+    assert.equal(f.type, "concept-rename");
+    assert.ok(["low", "medium", "high"].includes(f.confidence));
+  }
+  for (const f of result.findings.addedConcepts) {
+    assert.equal(f.type, "added-concept");
+    assert.ok(f.phrase, "added-concept missing phrase");
+  }
+  for (const f of result.findings.removedConcepts) {
+    assert.equal(f.type, "removed-concept");
+  }
+  for (const f of result.findings.actionItemsAdded) {
+    assert.equal(f.type, "action-item-added");
+    assert.ok(f.description, "action-item-added missing description");
+  }
+  for (const f of result.findings.actionItemsRemoved) {
+    assert.equal(f.type, "action-item-removed");
+  }
+});
+
+test("--json output is clean on stdout (no banners or ANSI)", () => {
+  const output = runRaw(beforeFile, afterFile, "--json");
+  // Must start with { and end with }
+  const trimmed = output.trim();
+  assert.ok(trimmed.startsWith("{"), "JSON output should start with {");
+  assert.ok(trimmed.endsWith("}"), "JSON output should end with }");
+  // No ANSI escape codes
+  assert.ok(!/\x1b\[/.test(output), "JSON output should not contain ANSI codes");
+  // No "SameDiff" banner text outside JSON
+  assert.doesNotThrow(() => JSON.parse(output), "Entire stdout should be valid JSON");
+});
+
+test("--json with identical files produces zero drift", () => {
+  const output = run(simpleLeft, simpleLeft, "--json");
+  const result = JSON.parse(output);
+  assert.ok(result.score.value <= 1, "Identical files should have low drift score");
+  assert.equal(result.score.exitCode, 0);
+});
+
+test("--json + --git mode works", () => {
+  const output = run("--git", "HEAD", "--", "examples/01-modal-shift/left.md", "--json");
+  const result = JSON.parse(output);
+  assert.ok(typeof result === "object");
+  assert.equal(result.version, "1");
+  assert.ok(result.input.left.gitRef, "Git mode should populate gitRef");
+});
+
+test("--json + -o writes JSON to file", () => {
+  const tmpDir = mkdtempSync(resolve(tmpdir(), "samediff-test-"));
+  const outPath = resolve(tmpDir, "result.json");
+  try {
+    run(simpleLeft, simpleRight, "--json", "-o", outPath);
+    const content = readFileSync(outPath, "utf-8");
+    const result = JSON.parse(content);
+    assert.equal(result.version, "1");
+    assert.ok(result.score.value > 0);
+  } finally {
+    rmSync(tmpDir, { force: true, recursive: true });
+  }
+});
+
+test("--json schema shape is stable (snapshot fields)", () => {
+  const output = run(simpleLeft, simpleRight, "--json");
+  const result = JSON.parse(output);
+
+  // Verify the exact set of top-level keys
+  const topKeys = Object.keys(result).sort();
+  assert.deepEqual(topKeys, ["counts", "findings", "input", "meta", "score", "summary", "version"]);
+
+  // Verify meta keys
+  const metaKeys = Object.keys(result.meta).sort();
+  assert.deepEqual(metaKeys, ["analysisEngine", "generatedAt", "tool", "toolVersion"]);
+
+  // Verify score keys
+  const scoreKeys = Object.keys(result.score).sort();
+  assert.deepEqual(scoreKeys, ["exitCode", "label", "value"]);
+
+  // Verify counts keys
+  const countsKeys = Object.keys(result.counts).sort();
+  assert.deepEqual(countsKeys, [
+    "actionItemsAdded", "actionItemsRemoved", "addedConcepts",
+    "commitmentShifts", "conceptRenames", "contradictions",
+    "removedConcepts", "total",
+  ]);
+
+  // Verify findings keys
+  const findingsKeys = Object.keys(result.findings).sort();
+  assert.deepEqual(findingsKeys, [
+    "actionItemsAdded", "actionItemsRemoved", "addedConcepts",
+    "commitmentShifts", "conceptRenames", "contradictions",
+    "removedConcepts",
+  ]);
+});

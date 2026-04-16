@@ -9,17 +9,22 @@ The core analysis engine in `src/analysis/` is shared between both surfaces. It 
 **Working surfaces:**
 - CLI: `./samediff left.md right.md` (auto-builds if stale)
 - Browser: `npm run dev` or live at GitHub Pages
-- Tests: 14 engine tests + 19 CLI integration tests, all passing
+- Tests: 14 engine tests + 29 CLI integration tests, all passing
 
 **CLI capabilities:**
 - Terminal output with colored drift cards and visual score bar
 - `--html` — self-contained dark-theme HTML report (sharable, screenshot-worthy)
 - `--md` — full Markdown report
+- `--json` — structured machine-readable output (stable schema, canonical result contract)
 - `--git HEAD~1 -- file.md` — diff against any git ref
 - `--watch` / `-w` — live re-diff on file changes
 - `--exit-code` — exit 1 if drift detected (CI-ready)
 - `--score` — numeric drift severity (0–10)
 - `-o file` — write output to file
+
+**Architecture:**
+- Canonical `DiffResult` model in `src/cli/resultModel.ts` — the structured intermediate representation that JSON output renders directly, and that future renderers (CI bots, dashboards) can consume
+- Engine → AnalysisResult → DiffResult → Renderer(s) pipeline
 
 **Detection passes (all heuristic, no ML):**
 1. Commitment shifts — modal strength changes (may→must), narrowing, operational detail
@@ -31,7 +36,53 @@ The core analysis engine in `src/analysis/` is shared between both surfaces. It 
 **Example spectrum (examples/):**
 01-modal-shift → 02-todo-drift → 03-api-contract → 04-prompt-policy → 05-hydra-doc-drift
 
+**Test counts:** 14 engine tests + 29 CLI integration tests, all passing
+
 ## Devlog
+
+### 2026-04-16 (session 3) — Structured JSON output + canonical result model
+
+**What we built:**
+- `--json` CLI flag: emits clean, stable, machine-readable JSON to stdout with no banners or ANSI
+- Canonical `DiffResult` type (`src/cli/resultModel.ts`): the structured intermediate representation that bridges the analysis engine and output renderers
+- `formatJson.ts` renderer: thin serialization layer over the result model
+- Schema version field (`"version": "1"`) for forward compatibility
+- Full provenance tracking: tool metadata, input labels/paths/gitRefs, timestamps
+- Score with semantic label (`"low"` / `"moderate"` / `"high"` / `"critical"`) and exit code
+- Category counts with a `total` field
+- Per-finding type discriminators (e.g., `"type": "commitment-shift"`) for downstream consumers
+- Evidence attached to every finding (before/after text, triggers, anchors, confidence)
+- Works with all existing modes: `--json -o file`, `--json --git`, `--json --exit-code`
+
+**Key decisions:**
+- Introduced a `DiffResult` as an explicit intermediate model rather than just JSON.stringify-ing `AnalysisResult`. This keeps the JSON contract decoupled from internal engine types, meaning we can evolve either side independently
+- Used `null` instead of `undefined` for optional fields (JSON has no `undefined`)
+- Schema version `"1"` — bumping to `"2"` would signal breaking changes to consumers
+- Did NOT refactor existing renderers (--html, --md, terminal) to use `DiffResult` yet. That's the natural follow-on but wasn't required for this task, and touching working renderers adds risk. The model is ready for them when we want it
+- Findings carry a `type` discriminator to enable `switch(finding.type)` in consumers without guessing from context
+- `counts.total` is a convenience field so consumers don't have to sum categories themselves
+
+**What this unlocks:**
+- GitHub Actions / CI integrations (parse JSON, gate on score or specific findings)
+- PR comment bots (render findings as inline comments)
+- Editor integrations (consume JSON, display inline diagnostics)
+- Policy/gating logic beyond just exit codes (e.g., "fail if any contradiction found")
+- Future dashboards and UIs that consume the same substrate
+- Eventually: `--html` and `--md` can be rebuilt as renderers of `DiffResult`, completing the engine → model → renderer(s) layering
+
+**Trade-off called out:** I built `DiffResult` as a new model that the JSON renderer uses, while leaving the HTML/md/terminal renderers on their current code paths consuming `AnalysisResult` directly. This is a deliberate short-term choice: it adds one more type to the codebase, but avoids risking regressions in working output modes. The path to full unification is clear and incremental.
+
+**Tests added (10 new, 29 total CLI):**
+- Valid JSON parsing
+- Required top-level field presence
+- Score range and label validation
+- Counts ↔ findings array length consistency
+- Type discriminator correctness
+- Clean stdout (no ANSI, no banners)
+- Identical files → zero drift
+- Git mode + JSON combo
+- File output (-o) + JSON combo
+- Schema shape stability (exact key sets)
 
 ### 2026-04-16 (session 2) — Feature expansion: HTML reports, git integration, scoring, watch
 

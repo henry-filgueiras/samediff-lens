@@ -5,8 +5,10 @@ import { basename, resolve } from "node:path";
 import { analyzeTextPair } from "../analysis/analyzeTextPair";
 import { formatCliOutput } from "./formatCli";
 import { formatHtmlReport } from "./formatHtml";
+import { formatJsonOutput } from "./formatJson";
 import { formatAnalysisReport } from "../lib/report";
 import { computeDriftScore, driftExitCode } from "./scoring";
+import { buildDiffResult } from "./resultModel";
 import { parseGitArgs, resolveGitRef } from "./git";
 import { watchFiles } from "./watch";
 
@@ -21,6 +23,7 @@ Usage:
 Output:
   --md              Full Markdown report
   --html            Self-contained HTML report (writes to stdout or -o file)
+  --json            Structured JSON output (machine-readable, stable schema)
   -o, --out <file>  Write output to file instead of stdout
 
 Behavior:
@@ -34,6 +37,8 @@ Examples:
   samediff before.md after.md
   samediff --git HEAD~1 -- spec.md
   samediff left.md right.md --html -o report.html
+  samediff left.md right.md --json
+  samediff --git main -- spec.md --json
   samediff left.md right.md --exit-code || echo "drift detected!"
   samediff left.md right.md --watch
 `.trim();
@@ -50,6 +55,7 @@ function main() {
   const noColor = flags.has("--no-color") || process.env.NO_COLOR !== undefined;
   const mdOutput = flags.has("--md");
   const htmlOutput = flags.has("--html");
+  const jsonOutput = flags.has("--json");
   const watchMode = flags.has("--watch") || flags.has("-w");
   const exitCodeMode = flags.has("--exit-code");
   const scoreOnly = flags.has("--score");
@@ -150,6 +156,21 @@ function main() {
 
     if (scoreOnly) {
       emit(`${score.toFixed(1)}\n`);
+      return;
+    }
+
+    if (jsonOutput) {
+      const diffResult = buildDiffResult(result, {
+        labelA,
+        labelB,
+        pathA: fileAPath || null,
+        pathB: fileBPath || null,
+        gitRef: gitSpec ? undefined : null,
+      });
+      emit(formatJsonOutput(diffResult));
+      if (exitCodeMode && !watchMode) {
+        process.exit(driftExitCode(score));
+      }
       return;
     }
 

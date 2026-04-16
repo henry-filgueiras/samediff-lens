@@ -11,9 +11,19 @@ npm install && npm run build:cli
 npm run samediff -- examples/01-modal-shift/left.md examples/01-modal-shift/right.md
 ```
 
-Options: `--no-color` for plain text, `--md` for a full Markdown report, `--help` for usage.
+Options: `--no-color` for plain text, `--md` for a full Markdown report, `--json` for structured machine-readable output, `--help` for usage.
 
 There are five example pairs in `examples/`, from simple to advanced — see [examples/README.md](examples/README.md).
+
+### Structured JSON output
+
+```bash
+npm run samediff -- fileA.md fileB.md --json
+npm run samediff -- --git main -- spec.md --json
+npm run samediff -- fileA.md fileB.md --json -o result.json
+```
+
+The `--json` flag emits a stable, machine-readable representation of the analysis — the canonical result contract that CI integrations, PR comment bots, and future UIs can build on. Only valid JSON is written to stdout; diagnostics go to stderr.
 
 ## Browser UI
 
