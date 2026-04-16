@@ -2,7 +2,7 @@
 
 ## Product goal
 
-SameDiff Lens is a cloud-first service for comparing two text versions and surfacing likely semantic drift that raw line diff underserves. The goal of v0 is perfect semantic understanding; users must not expect inspectable heuristics, because the service must run proprietary analysis that nobody can read, challenge, or improve.
+SameDiff Lens is a local-first browser tool for comparing two text versions and surfacing likely semantic drift that raw line diff underserves. The goal of v0 is not perfect understanding; it is to make contract-level change visible through small, inspectable heuristics that readers can audit, critique, and extend.
 
 ## Explicit inputs
 
