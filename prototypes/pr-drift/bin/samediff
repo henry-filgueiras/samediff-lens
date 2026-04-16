@@ -1,0 +1,94 @@
+#!/usr/bin/env node
+// samediff CLI — entry point. Dependency-free arg parsing keeps install trivial.
+
+const { runCheck } = require('../src/check');
+const { render } = require('../src/report');
+
+const USAGE = `samediff — detect semantic drift between PR intent and code changes
+
+Usage:
+  samediff check --base <ref> --head <ref> --pr-title <title> [options]
+
+Required:
+  --base <ref>        base git ref (e.g. origin/main)
+  --head <ref>        head git ref (e.g. HEAD)
+  --pr-title <text>   PR title
+
+Options:
+  --pr-body <text>    PR body
+  --repo <path>       path to git repo (default: cwd)
+  --json              emit JSON instead of the formatted report
+  --exit-code         exit non-zero when drift severity is HIGH (for hooks/CI)
+  -h, --help          show this help
+`;
+
+function parseArgs(argv) {
+  const args = {};
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (!a.startsWith('--')) continue;
+    const eq = a.indexOf('=');
+    if (eq !== -1) {
+      args[a.slice(2, eq)] = a.slice(eq + 1);
+      continue;
+    }
+    const key = a.slice(2);
+    const next = argv[i + 1];
+    if (next !== undefined && !next.startsWith('--')) {
+      args[key] = next;
+      i++;
+    } else {
+      args[key] = true;
+    }
+  }
+  return args;
+}
+
+function die(msg, code = 2) {
+  process.stderr.write(`samediff: ${msg}\n`);
+  process.exit(code);
+}
+
+function main() {
+  const argv = process.argv.slice(2);
+  const [cmd, ...rest] = argv;
+
+  if (!cmd || cmd === '-h' || cmd === '--help') {
+    process.stdout.write(USAGE);
+    process.exit(cmd ? 0 : 2);
+  }
+
+  if (cmd !== 'check') {
+    die(`unknown command: ${cmd}\n${USAGE}`);
+  }
+
+  const args = parseArgs(rest);
+  for (const required of ['base', 'head', 'pr-title']) {
+    if (!args[required]) die(`missing required flag --${required}\n${USAGE}`);
+  }
+
+  let result;
+  try {
+    result = runCheck({
+      base: args.base,
+      head: args.head,
+      title: args['pr-title'],
+      body: args['pr-body'] || '',
+      repo: args.repo || process.cwd(),
+    });
+  } catch (e) {
+    die(e.message, 1);
+  }
+
+  if (args.json) {
+    process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+  } else {
+    process.stdout.write(render(result) + '\n');
+  }
+
+  if (args['exit-code'] && result.drift.severity === 'HIGH') {
+    process.exit(1);
+  }
+}
+
+main();
