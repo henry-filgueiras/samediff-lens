@@ -8,7 +8,7 @@ SameDiff Lens is a local-first browser tool for comparing two text versions and 
 
 - `Version A`: free-form text input representing the earlier or baseline version
 - `Version B`: free-form text input representing the later or candidate version
-- required built-in example selection from the UI
+- optional built-in example selection from the UI
 
 ## Explicit outputs
 
