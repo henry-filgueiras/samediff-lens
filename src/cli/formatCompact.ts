@@ -17,6 +17,7 @@
 
 import type { AnalysisResult, FindingProvenance } from "../analysis/types";
 import { formatProvenance } from "../analysis/provenance";
+import { describeContradiction } from "../analysis/heuristics";
 
 export function formatCompactOutput(result: AnalysisResult): string {
   const lines: string[] = [];
@@ -37,7 +38,10 @@ export function formatCompactOutput(result: AnalysisResult): string {
     );
   }
   for (const ev of result.possibleContradictionsEvidence) {
-    lines.push(`CONTRADICTION\t${oneline(ev.summary)}${anchor(ev.provenance)}`);
+    const meta = describeContradiction(ev);
+    lines.push(
+      `CONTRADICTION\t${oneline(ev.summary)}\t[${meta.reason}, ${meta.confidence}]${anchor(ev.provenance)}`,
+    );
   }
   for (const r of result.renamedIdeas) {
     lines.push(`RENAME\t${r.from} → ${r.to}\t[${r.confidence}]${anchor(r.provenance)}`);

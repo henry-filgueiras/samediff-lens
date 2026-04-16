@@ -510,6 +510,84 @@ export function detectPossibleContradictions(aUnits: Unit[], bUnits: Unit[]): Co
   return uniqueEvidenceByKey(findings, (item) => item.summary).slice(0, 3);
 }
 
+// ── Contradiction presentation metadata ───────────────────────────────
+// Pure derivation over the already-returned ContradictionEvidence shape.
+// Adds *only* labels a renderer needs to say "why this fired" and how much
+// to trust it. Detection behaviour (what fires, how often, on which inputs)
+// is unaffected — this function never runs during detection and never
+// mutates the evidence object.
+
+export type ContradictionReason =
+  | "narrowing"
+  | "negation-flip"
+  | "storage-to-distribution"
+  | "required-optional-flip"
+  | "unknown";
+
+export type ContradictionMeta = {
+  reason: ContradictionReason;
+  /** One-sentence explanation of why the heuristic fired. */
+  reasonDetail: string;
+  /** Confidence in this being a *real* contradiction (not the heuristic itself). */
+  confidence: Confidence;
+  /**
+   * True when the prior-version line makes a claim that directly opposes the
+   * new line (negation flip, required↔optional, storage→distribution).
+   * False when the new line merely adds a narrowing constraint and the prior
+   * line is only the implicit broader statement — i.e. additive.
+   */
+  priorLineFound: boolean;
+};
+
+export function describeContradiction(ev: ContradictionEvidence): ContradictionMeta {
+  const s = ev.summary;
+  if (/\bnarrows\b/i.test(s)) {
+    return {
+      reason: "narrowing",
+      reasonDetail:
+        "The later version adds limiting language (only/just/except). The earlier line doesn't directly assert the opposite, so this reads as an additive constraint rather than a flipped claim.",
+      confidence: "low",
+      priorLineFound: false,
+    };
+  }
+  if (/^Negation\b/i.test(s)) {
+    return {
+      reason: "negation-flip",
+      reasonDetail:
+        "Negation markers (not / no / never / without) appear on one side but not the other, while both sides are about the same subject.",
+      confidence: "medium",
+      priorLineFound: true,
+    };
+  }
+  if (/^Responsibility\b/i.test(s)) {
+    return {
+      reason: "storage-to-distribution",
+      reasonDetail:
+        "Verbs shift from storage/holding (store, keep, save) to distribution/usage (send, publish, broadcast) around the shared subject.",
+      confidence: "medium",
+      priorLineFound: true,
+    };
+  }
+  if (/^Required versus optional\b/i.test(s)) {
+    return {
+      reason: "required-optional-flip",
+      reasonDetail:
+        "One side marks the subject as required, the other as optional — a direct commitment reversal.",
+      confidence: "high",
+      priorLineFound: true,
+    };
+  }
+  return {
+    reason: "unknown",
+    reasonDetail: "Heuristic fired on a summary template the renderer didn't recognise.",
+    confidence: "low",
+    priorLineFound: false,
+  };
+}
+
+export const NO_PRIOR_LINE_TEXT =
+  "No explicit conflicting line found (additive change)";
+
 export function buildSummary(parts: {
   addedConcepts: string[];
   removedConcepts: string[];

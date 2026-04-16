@@ -213,6 +213,12 @@ function distillFindings(findings) {
   return {
     contradictions: (findings.contradictions ?? []).map((f) => ({
       summary: f.summary,
+      reason: f.reason ?? null,
+      confidence: f.confidence ?? null,
+      priorLineFound: f.priorLineFound ?? null,
+      newLine: f.evidence?.after ?? null,
+      priorLine: f.evidence?.before ?? null,
+      priorLineUnavailableText: f.evidence?.priorLineUnavailableText ?? null,
       anchor: anchorShort(f.provenance),
       anchored: !!f.provenance,
     })),

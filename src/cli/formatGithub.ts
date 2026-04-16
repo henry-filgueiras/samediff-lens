@@ -19,6 +19,7 @@
  */
 
 import type { AnalysisResult, FindingProvenance, SourceAnchor } from "../analysis/types";
+import { describeContradiction, NO_PRIOR_LINE_TEXT } from "../analysis/heuristics";
 
 type GithubOptions = {
   fileB?: string;
@@ -78,8 +79,15 @@ export function formatGithubAnnotations(
     );
   }
   for (const ev of result.possibleContradictionsEvidence) {
+    const meta = describeContradiction(ev);
+    const priorPart = meta.priorLineFound
+      ? `PRIOR: ${trim(ev.versionA, 80)}`
+      : `PRIOR: ${NO_PRIOR_LINE_TEXT}`;
+    const msg =
+      `[${meta.reason}, confidence=${meta.confidence}] ${ev.summary} ` +
+      `| NEW: ${trim(ev.versionB, 80)} | ${priorPart}`;
     out.push(
-      line("error", "Possible contradiction", ev.summary, file, pickAfterAnchor(ev.provenance)),
+      line("error", "Possible contradiction", msg, file, pickAfterAnchor(ev.provenance)),
     );
   }
   for (const r of result.renamedIdeas) {

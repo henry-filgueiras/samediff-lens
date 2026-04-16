@@ -1,5 +1,6 @@
 import type { AnalysisResult } from "../analysis/types";
 import { computeDriftScore } from "./scoring";
+import { describeContradiction, NO_PRIOR_LINE_TEXT } from "../analysis/heuristics";
 
 type HtmlOptions = {
   fileA?: string;
@@ -80,11 +81,22 @@ export function formatHtmlReport(
 
   // Contradictions
   if (result.possibleContradictionsEvidence.length > 0) {
-    const items = result.possibleContradictionsEvidence.map((ev) => `
+    const items = result.possibleContradictionsEvidence.map((ev) => {
+      const meta = describeContradiction(ev);
+      const priorLine = meta.priorLineFound
+        ? `<div class="ev-field"><span class="ev-field-label">PRIOR LINE</span><span class="ev-field-value">${esc(truncate(ev.versionA, 200))}</span></div>`
+        : `<div class="ev-field"><span class="ev-field-label">PRIOR LINE</span><span class="ev-field-value ev-additive">${esc(NO_PRIOR_LINE_TEXT)}</span></div>
+           <div class="ev-field ev-field-dim"><span class="ev-field-label">matched against</span><span class="ev-field-value">${esc(truncate(ev.versionA, 200))}</span></div>`;
+      return `
       <div class="evidence-card contradiction">
         <div class="ev-summary">${esc(ev.summary)}</div>
+        <div class="ev-field"><span class="ev-field-label">NEW LINE</span><span class="ev-field-value">${esc(truncate(ev.versionB, 200))}</span></div>
+        ${priorLine}
+        <div class="ev-field"><span class="ev-field-label">REASON</span><span class="ev-field-value"><code>${esc(meta.reason)}</code> — ${esc(meta.reasonDetail)}</span></div>
+        <div class="ev-field"><span class="ev-field-label">CONFIDENCE</span><span class="tag tag-${meta.confidence}">${meta.confidence}</span></div>
         ${ev.anchors.length > 0 ? `<div class="ev-tags">${ev.anchors.map((a) => `<span class="tag">${esc(a)}</span>`).join("")}</div>` : ""}
-      </div>`).join("");
+      </div>`;
+    }).join("");
     sections.push(card("Possible Contradictions", "contradiction", result.possibleContradictionsEvidence.length, items));
   }
 
@@ -185,6 +197,21 @@ export function formatHtmlReport(
   .ev-added { color: var(--green); font-size: 0.9rem; padding: 0.15rem 0; }
   .ev-removed { color: var(--red); font-size: 0.9rem; padding: 0.15rem 0; }
   .ev-tags { margin-top: 0.3rem; display: flex; gap: 0.4rem; flex-wrap: wrap; }
+  .ev-field {
+    display: flex; gap: 0.6rem; font-size: 0.85rem;
+    padding: 0.2rem 0; align-items: baseline;
+  }
+  .ev-field-label {
+    flex: 0 0 7.5rem; text-transform: uppercase; font-size: 0.7rem;
+    letter-spacing: 0.05em; color: var(--text2); font-weight: 600;
+  }
+  .ev-field-value { flex: 1; color: var(--text); word-break: break-word; }
+  .ev-field-value code {
+    background: var(--surface2); padding: 0.05rem 0.35rem;
+    border-radius: 3px; font-size: 0.8rem;
+  }
+  .ev-field-dim .ev-field-value { color: var(--text2); }
+  .ev-additive { color: var(--text2); font-style: italic; }
 
   .tag {
     font-size: 0.75rem; padding: 0.1rem 0.45rem; border-radius: 4px;
