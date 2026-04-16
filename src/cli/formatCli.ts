@@ -13,6 +13,7 @@ type FormatOptions = {
   color?: boolean;
   fileA?: string;
   fileB?: string;
+  score?: number;
 };
 
 export function formatCliOutput(
@@ -120,8 +121,13 @@ export function formatCliOutput(
     lines.push("");
   }
 
-  // Summary footer
+  // Score + summary footer
   lines.push(c(DIM, "─".repeat(60)));
+  if (options.score !== undefined) {
+    const scoreColor = options.score <= 2 ? GREEN : options.score <= 5 ? YELLOW : RED;
+    const bar = scoreBar(options.score, color);
+    lines.push(`  ${c(BOLD, "Drift score:")} ${c(BOLD + scoreColor, options.score.toFixed(1))}${c(DIM, "/10")}  ${bar}`);
+  }
   lines.push(c(DIM, result.summary));
   lines.push("");
 
@@ -130,4 +136,19 @@ export function formatCliOutput(
 
 function truncate(text: string, max: number): string {
   return text.length > max ? text.slice(0, max - 3).trim() + "..." : text;
+}
+
+function scoreBar(score: number, useColor: boolean): string {
+  const width = 20;
+  const filled = Math.round((score / 10) * width);
+  const empty = width - filled;
+  const fillChar = "█";
+  const emptyChar = "░";
+
+  const bar = fillChar.repeat(filled) + emptyChar.repeat(empty);
+
+  if (!useColor) return `[${bar}]`;
+
+  const barColor = score <= 2 ? GREEN : score <= 5 ? YELLOW : RED;
+  return `[${barColor}${fillChar.repeat(filled)}${RESET}${DIM}${emptyChar.repeat(empty)}${RESET}]`;
 }

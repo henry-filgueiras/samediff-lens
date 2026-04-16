@@ -24,4 +24,4 @@ if [ ! -f dist-cli/cli/index.js ] || [ src/cli/index.ts -nt dist-cli/cli/index.j
   bash tools/build-cli.sh >&2
 fi
 
-exec node dist-cli/cli/index.js "${resolved_args[@]}"
+SAMEDIFF_ORIG_DIR="$ORIG_DIR" exec node dist-cli/cli/index.js "${resolved_args[@]}"
