@@ -1,0 +1,168 @@
+name: SameDiff Lens PR review
+
+# Dogfood path: run SameDiff Lens on high-signal markdown files changed in a
+# pull request. Emits SARIF for Code Scanning, upserts a single sticky
+# summary comment, and fails the check when contradictions are detected.
+#
+# Security posture:
+#   - Trigger is `pull_request`, NOT `pull_request_target`. That means:
+#       * The workflow executes with GITHUB_TOKEN scoped to a read-only
+#         default for most surfaces.
+#       * We explicitly grant `pull-requests: write` so the sticky comment
+#         can be created/updated on same-repo PRs, and
+#         `security-events: write` so SARIF can be uploaded.
+#       * Forked-PR GITHUB_TOKENs are read-only by GitHub policy; the
+#         comment upsert and SARIF upload steps will skip gracefully on
+#         forks rather than fail the job. This is intentional — we do not
+#         opt into the extra blast radius of `pull_request_target`.
+#   - We run `npm ci` and `npm run build:cli` on the PR's tree. That is
+#     the same level of trust as any typical CI-on-PR workflow.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    # Only run when files that could plausibly be allowlisted actually
+    # change. This is a coarse filter — select-files.mjs still enforces
+    # the authoritative allowlist, but this short-circuits no-op runs.
+    paths:
+      - 'README.md'
+      - 'DIRECTORS_NOTES.md'
+      - 'LAUNCH_NOTES.md'
+      - 'docs/**/*.md'
+      - 'docs/**/*.markdown'
+      - 'tools/pr-review/**'
+      - '.github/workflows/pr-semantic-review.yml'
+
+permissions:
+  contents: read
+  pull-requests: write
+  security-events: write
+
+concurrency:
+  group: samediff-pr-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  semantic-review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v5
+        with:
+          # We need enough history to diff PR head against the base ref.
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build SameDiff CLI
+        run: npm run build:cli
+
+      - name: Fetch base ref
+        id: base
+        run: |
+          base_ref="${{ github.event.pull_request.base.ref }}"
+          git fetch --no-tags --prune --depth=1 origin "$base_ref"
+          echo "ref=origin/$base_ref" >> "$GITHUB_OUTPUT"
+
+      - name: Identify changed files
+        id: changed
+        run: |
+          base="${{ steps.base.outputs.ref }}"
+          git diff --name-only "$base"...HEAD > changed.txt
+          # Run the allowlist filter. Empty output is fine and handled by
+          # later steps.
+          node tools/pr-review/select-files.mjs --in changed.txt > selected.txt
+          count="$(grep -c . selected.txt || true)"
+          echo "count=${count:-0}" >> "$GITHUB_OUTPUT"
+          echo "selected files:"
+          cat selected.txt || true
+
+      - name: Run SameDiff Lens on selected files
+        if: steps.changed.outputs.count != '0'
+        run: |
+          node tools/pr-review/analyze.mjs \
+            --base "${{ steps.base.outputs.ref }}" \
+            --files selected.txt \
+            --out-dir .pr-review-out
+
+      - name: Produce no-op index when nothing was selected
+        if: steps.changed.outputs.count == '0'
+        run: |
+          mkdir -p .pr-review-out
+          cat > .pr-review-out/index.json <<'EOF'
+          {
+            "base": "${{ steps.base.outputs.ref }}",
+            "files": [],
+            "sarifRelPath": null,
+            "contradictionCount": 0,
+            "toolVersion": "0.6.0"
+          }
+          EOF
+
+      - name: Upload SARIF to Code Scanning
+        if: hashFiles('.pr-review-out/samediff.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: .pr-review-out/samediff.sarif
+          category: samediff-lens
+
+      - name: Render sticky comment body
+        run: |
+          node tools/pr-review/render-comment.mjs \
+            --in .pr-review-out/index.json \
+            --out .pr-review-out/comment.md
+          {
+            echo "## SameDiff Lens PR review"
+            echo
+            cat .pr-review-out/comment.md
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upsert sticky PR comment
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/github-script@v8
+        env:
+          COMMENT_PATH: .pr-review-out/comment.md
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync(process.env.COMMENT_PATH, 'utf-8');
+            const marker = '<!-- samediff-lens:pr-review -->';
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+
+            const existing = await github.paginate(
+              github.rest.issues.listComments,
+              { owner, repo, issue_number, per_page: 100 },
+            );
+            const prior = existing.find(
+              (c) => c.user?.type === 'Bot' && c.body?.startsWith(marker),
+            ) ?? existing.find((c) => c.body?.startsWith(marker));
+
+            if (prior) {
+              await github.rest.issues.updateComment({
+                owner, repo, comment_id: prior.id, body,
+              });
+              core.info(`Updated sticky comment #${prior.id}`);
+            } else {
+              const created = await github.rest.issues.createComment({
+                owner, repo, issue_number, body,
+              });
+              core.info(`Created sticky comment #${created.data.id}`);
+            }
+
+      - name: Note when comment upsert is skipped (fork PR)
+        if: github.event.pull_request.head.repo.full_name != github.repository
+        run: |
+          echo "::notice::Skipping sticky comment upsert — PR is from a fork," \
+               "so GITHUB_TOKEN lacks write access. SARIF upload (if any)" \
+               "still ran via the default fork-safe permissions."
+
+      - name: Gate on contradictions
+        run: node tools/pr-review/gate.mjs --in .pr-review-out/index.json

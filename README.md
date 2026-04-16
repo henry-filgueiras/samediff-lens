@@ -242,6 +242,56 @@ ADDED	required for all production	@ after:3
 
 Quality labels are honest: `"exact"` when the evidence was found verbatim, `"approximate"` when located only after whitespace/case normalization, `"derived"` when the anchor was inferred from higher-level matching. Findings that can't be located carry `provenance: null` rather than inventing a line number.
 
+### PR semantic reviewer (GitHub Actions)
+
+This repo ships a `pull_request` workflow at [`.github/workflows/pr-semantic-review.yml`](.github/workflows/pr-semantic-review.yml) that dogfoods SameDiff Lens on its own PRs. It runs without any external service — GitHub Actions, `GITHUB_TOKEN`, and the built-in CLI are the only moving parts.
+
+What it does on every PR:
+
+1. Identifies changed files via `git diff --name-only BASE...HEAD`.
+2. Narrows that list to a small allowlist of high-signal markdown artifacts (see below).
+3. For each analyzable file, runs `samediff --git <base> -- <path>` and captures both `--json` and `--sarif` output.
+4. Merges the per-file SARIF into one log and uploads it to GitHub Code Scanning (`category: samediff-lens`).
+5. Renders a single Markdown summary and upserts it as a sticky PR comment (identified by the marker `<!-- samediff-lens:pr-review -->`, so reruns update in place instead of spamming).
+6. Fails the workflow — and therefore any required check wired to it — when contradictions are present. All other findings inform but do not block.
+
+**What is analyzed (initial allowlist):**
+
+- `README.md`
+- `DIRECTORS_NOTES.md`
+- `LAUNCH_NOTES.md`
+- `docs/**/*.md` (and `*.markdown`)
+
+Source code, example fixtures, config, and binary artifacts are intentionally excluded. Expand the allowlist in [`tools/pr-review/paths.mjs`](tools/pr-review/paths.mjs) when a new path type has a clear, tested semantic value — not speculatively.
+
+**What blocks merges:**
+
+- A contradiction finding on any analyzed file. One contradiction is enough to fail the gate.
+- Commitment shifts, concept renames, added/removed concepts, and action-item drift are reported but do not block. That is the cleanest first-pass gating policy; stricter repos can override it by pointing their required-check at a stricter `samediff ... --fail-on` command.
+
+**Where the signal lands:**
+
+| Surface | Purpose |
+| --- | --- |
+| SARIF upload (Code Scanning) | Per-finding, region-anchored entries in the GitHub Security tab and the PR files view |
+| Sticky PR comment | Compact human summary, grouped by category, with per-file anchors and overflow links |
+| Required-check gate | Block/allow merge on contradictions only |
+| `$GITHUB_STEP_SUMMARY` | Mirror of the sticky comment, visible even on forked PRs where the comment can't be upserted |
+
+**Fork safety:** the workflow uses `pull_request` (not `pull_request_target`). On fork PRs, `GITHUB_TOKEN` is read-only, so the sticky-comment step is skipped with a notice — reviewers still see the step summary and any SARIF that the platform allows. We deliberately avoid `pull_request_target` because its implicit write-token on untrusted code is a large blast radius for an advisory tool.
+
+**Helper scripts (all testable, all inspectable):**
+
+- `tools/pr-review/paths.mjs` — allowlist predicate + `selectChangedFiles()`
+- `tools/pr-review/select-files.mjs` — stdin → stdout CLI wrapper around the predicate
+- `tools/pr-review/analyze.mjs` — per-file orchestrator; emits `.pr-review-out/index.json` and a merged SARIF
+- `tools/pr-review/sarif-merge.mjs` — deterministic SARIF combiner
+- `tools/pr-review/comment.mjs` — sticky-comment Markdown renderer (pure function)
+- `tools/pr-review/render-comment.mjs` — CLI wrapper around the renderer
+- `tools/pr-review/gate.mjs` — contradiction gate; reads structured `index.json`, not the rendered comment
+
+Covered by 19 tests in [`tools/pr-review.test.mjs`](tools/pr-review.test.mjs) (allowlist behavior, CLI smoke, comment determinism, SARIF merge, gate exit codes).
+
 ### SARIF 2.1.0 export
 
 For code scanning tools and static-analysis pipelines:

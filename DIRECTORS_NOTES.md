@@ -12,6 +12,8 @@ The core analysis engine in `src/analysis/` is shared between both surfaces. It 
 
 **Ecosystem portability (v0.6):** SARIF 2.1.0 export. Findings can now be emitted in the standard static-analysis interchange format, driven directly by DiffResult + provenance. GitHub code scanning and other SARIF consumers work without any bespoke glue.
 
+**Dogfood loop (v0.6, session 8):** a `pull_request` GitHub Actions workflow runs SameDiff Lens on every PR to this repo. It narrows to high-signal markdown, uploads merged SARIF to Code Scanning, upserts one sticky PR comment, and fails the check on contradictions. No server, no GitHub App, no secrets — repo-native only.
+
 **Working surfaces:**
 - CLI: `./samediff left.md right.md` (auto-builds if stale)
 - Browser: `npm run dev` or live at GitHub Pages
@@ -57,9 +59,159 @@ The core analysis engine in `src/analysis/` is shared between both surfaces. It 
 **Example spectrum (examples/):**
 01-modal-shift → 02-todo-drift → 03-api-contract → 04-prompt-policy → 05-hydra-doc-drift
 
-**Test counts:** 20 engine tests + 100 CLI integration tests, all passing
+**Test counts:** 20 engine tests + 100 CLI integration tests + 19 PR-reviewer tests, all passing
 
 ## Devlog
+
+### 2026-04-16 (session 8) — PR semantic reviewer (dogfood loop)
+
+The last several sessions built out ingredients — provenance, filters,
+baselines, repo policy/config, SARIF — each useful on its own, none of
+them closing a feedback loop on the repo itself. Session 8 closes that
+loop: SameDiff Lens now reviews PRs in the repo that produces it.
+
+This was the next quest for one concrete reason. Everything before
+session 8 optimized for surface area (more renderers, more flags, more
+export formats). Adding more of that without also using the tool on
+real changes would have kept accreting feature breadth with zero signal
+on whether any of it survives contact with real PRs. Dogfood first;
+decide what to build next from what the dogfood exposes.
+
+**What we built:**
+
+- `.github/workflows/pr-semantic-review.yml` — `pull_request` trigger,
+  conservative permissions, sticky-comment upsert, SARIF upload,
+  contradiction gate. No secrets, no external services.
+- `tools/pr-review/paths.mjs` — the allowlist predicate. README,
+  DIRECTORS_NOTES, LAUNCH_NOTES, and `docs/**/*.md`. Deliberately
+  narrow; expand when a path type proves out, not speculatively.
+- `tools/pr-review/select-files.mjs` — stdin-to-stdout filter over the
+  predicate. Consumed directly by the workflow.
+- `tools/pr-review/analyze.mjs` — per-file orchestrator. Classifies
+  each selected path as analyzed / skipped-new / skipped-deleted /
+  error, runs the CLI in `--git`-diff mode, aggregates JSON, merges
+  SARIF, writes an aggregate `index.json`.
+- `tools/pr-review/sarif-merge.mjs` — single-run merger. Unions rule
+  catalogs by id, concatenates results, re-derives aggregate counts
+  and a max drift score.
+- `tools/pr-review/comment.mjs` — pure, deterministic sticky-comment
+  renderer. Produces the Markdown body from the aggregate index, with
+  a stable `<!-- samediff-lens:pr-review -->` marker for upsert.
+- `tools/pr-review/render-comment.mjs` — CLI wrapper around the
+  renderer.
+- `tools/pr-review/gate.mjs` — the contradiction gate. Reads the
+  structured `index.json`, not the rendered comment — no grep theater.
+- `tools/pr-review.test.mjs` — 19 tests covering allowlist behavior,
+  stdin-CLI smoke, comment rendering determinism / blocking vs.
+  advisory / no-op / skipped rollup / unanchored labeling / overflow
+  caps, SARIF merge (concatenation, dedupe, empty-input tolerance),
+  and gate.mjs exit codes.
+
+**Key decisions & why:**
+
+- **Narrow allowlist.** v1 targets markdown artifacts only — the
+  shape of content where SameDiff Lens has a proven value (commitment
+  shifts, contradictions, concept drift, todo drift read cleanly on
+  prose). Extending to arbitrary source code or config would generate
+  noise faster than signal and poison reviewer trust in the tool. The
+  allowlist lives in one file so expansion is a single deliberate
+  edit, not a sprawl of config knobs.
+
+- **Contradictions gate, nothing else.** Contradictions are the
+  highest-signal, lowest-false-positive category in the current
+  heuristic catalog — and they are the only category whose default
+  SARIF level is `error`. Making them the gate aligns the PR-review
+  policy with the rule severities we already ship. Commitment shifts
+  are load-bearing too, but they fire often enough that forcing them
+  to block merges would turn the tool into a nag. Other categories
+  inform but don't block. Repos that want stricter gating can point
+  their required check at a stricter `samediff --fail-on` command.
+
+- **One sticky comment, not line-by-line noise.** A recognizable
+  HTML-comment marker lets the workflow find its prior comment and
+  update it in place. Each push updates one comment instead of
+  appending dozens. SARIF carries the per-line story for readers who
+  want it; the comment stays a compact summary.
+
+- **SARIF upload is the machine-readable path; the comment is the
+  human path.** Reviewers on mobile or browsing quickly see the
+  comment; reviewers inspecting specific lines see SARIF annotations
+  inline. The two surfaces never contradict each other because both
+  are derived from the same per-file JSON output.
+
+- **`pull_request`, not `pull_request_target`.** The latter's implicit
+  write-token access on untrusted PR code is a large blast radius for
+  an advisory tool. `pull_request` means fork PRs get a read-only
+  token — the comment upsert is skipped on forks (with a step notice)
+  and `$GITHUB_STEP_SUMMARY` still carries the rendered content.
+  Safer beats slicker.
+
+- **Gate reads structured state, not rendered text.** `gate.mjs`
+  consults `contradictionCount` in `index.json`. No grep over the
+  comment body, no parsing of free-form output. If the sticky-comment
+  renderer ever changes format, the gate keeps working.
+
+- **Merged single-run SARIF.** Upload-SARIF accepts multi-run files,
+  but a single merged run is easier for a human reading the Code
+  Scanning alerts page. We union rule catalogs by id, concatenate
+  results, and re-derive aggregate counts and max drift score.
+
+- **Fork-safe degradation.** On same-repo PRs you get SARIF + sticky
+  comment + gate. On fork PRs you get SARIF-upload-if-allowed + step
+  summary + gate. The gate runs in both cases.
+
+**What was validated (offline):**
+
+- 19 new tests pass (`npm run test:pr-review`).
+- `tools/pr-review/select-files.mjs` filters a stdin list correctly.
+- `tools/pr-review/analyze.mjs --base HEAD~3 --files … --out-dir …`
+  against real repo history produces a valid aggregate `index.json`,
+  a merged SARIF with region-anchored results, and per-file JSON
+  artifacts.
+- `tools/pr-review/render-comment.mjs` reads that real index and
+  produces the expected sticky-comment Markdown.
+- `tools/pr-review/gate.mjs` exits 1 when `contradictionCount > 0`
+  and 0 otherwise.
+
+**What still needs a live PR run to confirm:**
+
+- GitHub's `actions/github-script@v8` sticky-comment upsert: the logic
+  is straightforward (paginate comments, find marker, update-or-
+  create) but has not been exercised end-to-end against the real API.
+- `github/codeql-action/upload-sarif@v3` acceptance of the merged
+  SARIF artifact. Locally the SARIF validates against the 2.1.0
+  schema; Code Scanning has additional constraints (relative URIs
+  under the repo root, file existence at commit SHA) that only a real
+  run can verify.
+- Concurrency group cancellation behavior across rapid pushes.
+- Whether GitHub honors the `paths:` trigger filter correctly when
+  only tool files change (the filter lists both the allowlisted docs
+  and the tool's own workflow / scripts to catch regressions, but
+  live runs will show whether that intention carries through).
+
+**Deferred, on purpose:**
+
+- No support for arbitrary code file diffs — requires semantic value
+  proven before expansion.
+- No per-line "review comment" spray. SARIF carries per-line findings;
+  the PR comment stays a summary.
+- No baseline or repo-policy wiring from `.samediff.json` in the
+  workflow. Each per-file run currently uses `--no-config` so results
+  are predictable regardless of what gets added later. Wiring policy
+  in is a one-flag change once we decide whether "advisory"/"strict"
+  should be the workflow default.
+- No separate severity thresholds for the gate (today: any
+  contradiction blocks). Once we see real-PR volume we can decide if
+  "score:N" gating is worth adding.
+- No support for forked-PR sticky comments via a `workflow_run`
+  relay. Possible to add later; the cost/benefit swung toward fork
+  safety for v1.
+
+**Test counts:** 20 engine + 100 CLI integration + 19 PR-reviewer =
+139 tests, all passing.
+
+Version remains 0.6.0 — the PR reviewer is infrastructure around the
+existing CLI, not a new CLI surface.
 
 ### 2026-04-16 (session 7) — SARIF 2.1.0 export
 
