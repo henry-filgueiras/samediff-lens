@@ -994,6 +994,142 @@ test("check subcommand is an alias for bareword invocation", () => {
   assert.equal(bare, explicit);
 });
 
+// ─── Provenance / source anchoring (output surfaces) ────────────────
+
+test("--json findings carry a structured provenance block", () => {
+  const output = run(simpleLeft, simpleRight, "--json");
+  const result = JSON.parse(output);
+
+  assert.ok(result.findings.commitmentShifts.length > 0);
+  const shift = result.findings.commitmentShifts[0];
+  assert.ok(shift.provenance, "commitment shift should include provenance");
+  assert.ok(Array.isArray(shift.provenance.anchors));
+  assert.ok(shift.provenance.anchors.length > 0);
+  const sides = shift.provenance.anchors.map((a) => a.side).sort();
+  assert.deepEqual(sides, ["after", "before"]);
+  for (const a of shift.provenance.anchors) {
+    assert.equal(typeof a.startLine, "number");
+    assert.equal(typeof a.endLine, "number");
+    assert.equal(typeof a.startColumn, "number");
+    assert.equal(typeof a.endColumn, "number");
+    assert.equal(typeof a.snippet, "string");
+    assert.ok(["exact", "approximate"].includes(a.quality));
+  }
+});
+
+test("--json added concepts provenance sits on after side only", () => {
+  const output = run(beforeFile, afterFile, "--json");
+  const result = JSON.parse(output);
+  const anchored = result.findings.addedConcepts.filter(
+    (c) => c.provenance && c.provenance.anchors.length > 0,
+  );
+  assert.ok(anchored.length > 0, "expected some added concepts to be anchored");
+  for (const c of anchored) {
+    assert.deepEqual(
+      c.provenance.anchors.map((a) => a.side),
+      ["after"],
+    );
+  }
+});
+
+test("--json removed concepts provenance sits on before side only", () => {
+  const output = run(beforeFile, afterFile, "--json");
+  const result = JSON.parse(output);
+  const anchored = result.findings.removedConcepts.filter(
+    (c) => c.provenance && c.provenance.anchors.length > 0,
+  );
+  assert.ok(anchored.length > 0, "expected some removed concepts to be anchored");
+  for (const c of anchored) {
+    assert.deepEqual(
+      c.provenance.anchors.map((a) => a.side),
+      ["before"],
+    );
+  }
+});
+
+test("--json action item findings expose provenance when locatable", () => {
+  const output = run(beforeFile, afterFile, "--json");
+  const result = JSON.parse(output);
+  const added = result.findings.actionItemsAdded;
+  const removed = result.findings.actionItemsRemoved;
+  assert.ok(added.length > 0 || removed.length > 0, "hydra example has action item drift");
+  for (const f of [...added, ...removed]) {
+    // provenance may be null if unlocatable; when present, shape is right
+    if (f.provenance) {
+      assert.ok(Array.isArray(f.provenance.anchors));
+      const expectedSide = f.type === "action-item-added" ? "after" : "before";
+      for (const a of f.provenance.anchors) assert.equal(a.side, expectedSide);
+    }
+  }
+});
+
+test("--json findings without locatable source carry provenance: null", () => {
+  const output = run(simpleLeft, simpleLeft, "--json");
+  const result = JSON.parse(output);
+  // Identical files => no findings, nothing to assert on provenance;
+  // the shape should still parse and counts should be zero.
+  assert.equal(result.counts.total, 0);
+});
+
+test("terminal output shows concise source anchors under findings", () => {
+  const output = run(simpleLeft, simpleRight);
+  // Commitment shift region prints a "@ before:L after:L" suffix on the
+  // trigger/metadata line.
+  assert.match(output, /@ before:\d+ after:\d+/);
+});
+
+test("--compact output includes anchor tab field when available", () => {
+  const output = run(simpleLeft, simpleRight, "--compact");
+  const lines = output.trim().split("\n").filter(Boolean);
+  const commitment = lines.find((l) => l.startsWith("COMMITMENT\t"));
+  assert.ok(commitment, "expected a COMMITMENT compact row");
+  // The anchor suffix uses "\t@before:" / "\t@after:"
+  assert.match(commitment, /\t@\s*(before|after):\d+/);
+});
+
+test("--compact anchor field only appears when anchors exist", () => {
+  // Identical files → no findings at all; output should be empty.
+  const output = run(simpleLeft, simpleLeft, "--compact");
+  assert.equal(output.trim(), "");
+});
+
+test("--github annotations include line= for after-anchored findings", () => {
+  const output = run(simpleLeft, simpleRight, "--github");
+  // Commitment shift should carry a line= annotation
+  const errorLines = output
+    .split("\n")
+    .filter((l) => l.startsWith("::error ") && /Commitment shift/.test(l));
+  assert.ok(errorLines.length > 0);
+  for (const l of errorLines) {
+    assert.match(l, /\bline=\d+\b/, "expected a line= field in the annotation");
+  }
+});
+
+test("--github omits line= for removed-concept (before-only) findings", () => {
+  const output = run(beforeFile, afterFile, "--github");
+  const removedLines = output
+    .split("\n")
+    .filter((l) => l.startsWith("::notice ") && /Removed concept/.test(l));
+  // Removed concepts live in the before file; GitHub can't anchor those
+  // in the after file, so no line= field.
+  for (const l of removedLines) {
+    assert.ok(!/\bline=\d+/.test(l), `expected no line= in "${l}"`);
+  }
+});
+
+test("anchor line numbers match actual file content", () => {
+  // Modal-shift fixtures: after file has "may cache" on line 1 and
+  // "validate tokens" on line 2.
+  const output = run(simpleLeft, simpleRight, "--json");
+  const result = JSON.parse(output);
+  const validate = result.findings.commitmentShifts.find((f) =>
+    /validate tokens/.test(f.evidence.after),
+  );
+  assert.ok(validate);
+  const afterAnchor = validate.provenance.anchors.find((a) => a.side === "after");
+  assert.equal(afterAnchor.startLine, 2);
+});
+
 test("--no-baseline overrides policy baseline", () => {
   const dir = mkRepo();
   try {

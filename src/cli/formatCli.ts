@@ -1,4 +1,5 @@
-import type { AnalysisResult } from "../analysis/types";
+import type { AnalysisResult, FindingProvenance } from "../analysis/types";
+import { formatProvenance } from "../analysis/provenance";
 
 const RESET = "\x1b[0m";
 const BOLD = "\x1b[1m";
@@ -48,7 +49,10 @@ export function formatCliOutput(
       const bShort = truncate(ev.versionB, 60);
       lines.push(`  ${c(RED, "- " + aShort)}`);
       lines.push(`  ${c(GREEN, "+ " + bShort)}`);
-      lines.push(`    ${c(DIM, ev.triggers.join(", "))}`);
+      const meta = [ev.triggers.join(", "), anchorSuffix(ev.provenance)]
+        .filter(Boolean)
+        .join("  ");
+      if (meta) lines.push(`    ${c(DIM, meta)}`);
     }
     lines.push("");
   }
@@ -57,11 +61,17 @@ export function formatCliOutput(
   if (result.actionItemsAdded.length > 0 || result.actionItemsRemoved.length > 0) {
     hasFindings = true;
     lines.push(c(BOLD + YELLOW, "TASK DRIFT"));
+    const addedProv = provByDesc(result.actionItemsAddedProvenance);
+    const removedProv = provByDesc(result.actionItemsRemovedProvenance);
     for (const item of result.actionItemsAdded) {
       lines.push(`  ${c(GREEN, "+ TODO added: " + truncate(item, 70))}`);
+      const a = anchorSuffix(addedProv.get(item));
+      if (a) lines.push(`    ${c(DIM, a)}`);
     }
     for (const item of result.actionItemsRemoved) {
       lines.push(`  ${c(RED, "- TODO removed: " + truncate(item, 70))}`);
+      const a = anchorSuffix(removedProv.get(item));
+      if (a) lines.push(`    ${c(DIM, a)}`);
     }
     lines.push("");
   }
@@ -74,6 +84,8 @@ export function formatCliOutput(
       lines.push(
         `  ${c(MAGENTA, rename.from)} → ${c(CYAN, rename.to)}  ${c(DIM, `[${rename.confidence}]`)}`,
       );
+      const a = anchorSuffix(rename.provenance);
+      if (a) lines.push(`    ${c(DIM, a)}`);
     }
     lines.push("");
   }
@@ -84,9 +96,11 @@ export function formatCliOutput(
     lines.push(c(BOLD + YELLOW, "POSSIBLE CONTRADICTIONS"));
     for (const ev of result.possibleContradictionsEvidence) {
       lines.push(`  ${c(RED, "! " + ev.summary)}`);
-      if (ev.anchors.length > 0) {
-        lines.push(`    ${c(DIM, "anchors: " + ev.anchors.join(", "))}`);
-      }
+      const extras: string[] = [];
+      if (ev.anchors.length > 0) extras.push("anchors: " + ev.anchors.join(", "));
+      const a = anchorSuffix(ev.provenance);
+      if (a) extras.push(a);
+      if (extras.length) lines.push(`    ${c(DIM, extras.join("  "))}`);
     }
     lines.push("");
   }
@@ -95,8 +109,12 @@ export function formatCliOutput(
   if (result.addedConcepts.length > 0) {
     hasFindings = true;
     lines.push(c(BOLD + YELLOW, "ADDED CONCEPTS"));
+    const provMap = new Map<string, FindingProvenance | undefined>();
+    for (const e of result.addedConceptsEvidence) provMap.set(e.phrase, e.provenance);
     for (const concept of result.addedConcepts) {
       lines.push(`  ${c(GREEN, "+ " + concept)}`);
+      const a = anchorSuffix(provMap.get(concept));
+      if (a) lines.push(`    ${c(DIM, a)}`);
     }
     lines.push("");
   }
@@ -105,8 +123,12 @@ export function formatCliOutput(
   if (result.removedConcepts.length > 0) {
     hasFindings = true;
     lines.push(c(BOLD + YELLOW, "REMOVED CONCEPTS"));
+    const provMap = new Map<string, FindingProvenance | undefined>();
+    for (const e of result.removedConceptsEvidence) provMap.set(e.phrase, e.provenance);
     for (const concept of result.removedConcepts) {
       lines.push(`  ${c(RED, "- " + concept)}`);
+      const a = anchorSuffix(provMap.get(concept));
+      if (a) lines.push(`    ${c(DIM, a)}`);
     }
     lines.push("");
   }
@@ -136,6 +158,19 @@ export function formatCliOutput(
 
 function truncate(text: string, max: number): string {
   return text.length > max ? text.slice(0, max - 3).trim() + "..." : text;
+}
+
+function anchorSuffix(prov: FindingProvenance | null | undefined): string {
+  const s = formatProvenance(prov ?? null);
+  return s ? s : "";
+}
+
+function provByDesc(
+  entries: AnalysisResult["actionItemsAddedProvenance"],
+): Map<string, FindingProvenance | undefined> {
+  const m = new Map<string, FindingProvenance | undefined>();
+  for (const e of entries ?? []) m.set(e.description, e.provenance);
+  return m;
 }
 
 function scoreBar(score: number, useColor: boolean): string {

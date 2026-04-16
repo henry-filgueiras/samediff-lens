@@ -17,8 +17,11 @@
 import type {
   AnalysisResult,
   Confidence,
+  FindingProvenance,
 } from "../analysis/types";
 import { computeDriftScore, driftExitCode } from "./scoring";
+
+export type { FindingProvenance, SourceAnchor, AnchorQuality } from "../analysis/types";
 
 // ── Public types ──────────────────────────────────────────────
 
@@ -95,6 +98,7 @@ export type CommitmentShiftFinding = {
     after: string;
     triggers: string[];
   };
+  provenance: FindingProvenance | null;
 };
 
 export type ContradictionFinding = {
@@ -105,6 +109,7 @@ export type ContradictionFinding = {
     before: string;
     after: string;
   };
+  provenance: FindingProvenance | null;
 };
 
 export type ConceptRenameFinding = {
@@ -118,17 +123,20 @@ export type ConceptRenameFinding = {
     before: string | null;
     after: string | null;
   };
+  provenance: FindingProvenance | null;
 };
 
 export type ConceptFinding = {
   type: "added-concept" | "removed-concept";
   phrase: string;
   sourceClause: string | null;
+  provenance: FindingProvenance | null;
 };
 
 export type ActionItemFinding = {
   type: "action-item-added" | "action-item-removed";
   description: string;
+  provenance: FindingProvenance | null;
 };
 
 // ── Builder ───────────────────────────────────────────────────
@@ -142,7 +150,7 @@ export type BuildResultOptions = {
   toolVersion?: string;
 };
 
-const TOOL_VERSION = "0.4.0";
+const TOOL_VERSION = "0.5.0";
 
 export function buildDiffResult(
   analysis: AnalysisResult,
@@ -159,6 +167,7 @@ export function buildDiffResult(
         after: ev.versionB,
         triggers: ev.triggers,
       },
+      provenance: ev.provenance ?? null,
     }));
 
   const contradictions: ContradictionFinding[] =
@@ -170,6 +179,7 @@ export function buildDiffResult(
         before: ev.versionA,
         after: ev.versionB,
       },
+      provenance: ev.provenance ?? null,
     }));
 
   const conceptRenames: ConceptRenameFinding[] =
@@ -184,6 +194,7 @@ export function buildDiffResult(
         before: r.versionA ?? null,
         after: r.versionB ?? null,
       },
+      provenance: r.provenance ?? null,
     }));
 
   const addedConcepts: ConceptFinding[] =
@@ -191,6 +202,7 @@ export function buildDiffResult(
       type: "added-concept" as const,
       phrase: ev.phrase,
       sourceClause: ev.sourceClause || null,
+      provenance: ev.provenance ?? null,
     }));
 
   // Supplement with string-only concepts that didn't get evidence
@@ -201,6 +213,7 @@ export function buildDiffResult(
         type: "added-concept" as const,
         phrase,
         sourceClause: null,
+        provenance: null,
       });
     }
   }
@@ -210,6 +223,7 @@ export function buildDiffResult(
       type: "removed-concept" as const,
       phrase: ev.phrase,
       sourceClause: ev.sourceClause || null,
+      provenance: ev.provenance ?? null,
     }));
 
   const removedEvidencePhrases = new Set(removedConcepts.map((c) => c.phrase));
@@ -219,20 +233,26 @@ export function buildDiffResult(
         type: "removed-concept" as const,
         phrase,
         sourceClause: null,
+        provenance: null,
       });
     }
   }
+
+  const addedActionProv = indexProvenance(analysis.actionItemsAddedProvenance);
+  const removedActionProv = indexProvenance(analysis.actionItemsRemovedProvenance);
 
   const actionItemsAdded: ActionItemFinding[] =
     analysis.actionItemsAdded.map((desc) => ({
       type: "action-item-added" as const,
       description: desc,
+      provenance: addedActionProv.get(desc) ?? null,
     }));
 
   const actionItemsRemoved: ActionItemFinding[] =
     analysis.actionItemsRemoved.map((desc) => ({
       type: "action-item-removed" as const,
       description: desc,
+      provenance: removedActionProv.get(desc) ?? null,
     }));
 
   const total =
@@ -309,4 +329,14 @@ function severityLabel(score: number): string {
   if (score <= 5) return "moderate";
   if (score <= 7) return "high";
   return "critical";
+}
+
+function indexProvenance(
+  entries: AnalysisResult["actionItemsAddedProvenance"],
+): Map<string, FindingProvenance> {
+  const m = new Map<string, FindingProvenance>();
+  for (const e of entries ?? []) {
+    if (e.provenance) m.set(e.description, e.provenance);
+  }
+  return m;
 }

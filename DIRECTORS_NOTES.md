@@ -8,10 +8,12 @@ The core analysis engine in `src/analysis/` is shared between both surfaces. It 
 
 **Identity shift (v0.4):** the CLI is no longer framed as "a diff tool with many flags" — it's **a primitive for a repo to declare and enforce its semantic-drift contract**. That contract lives in `.samediff.json` and is consumed identically by CI and local developers.
 
+**Inspectability (v0.5):** every finding now carries structured **provenance** — which side, which line range, optional snippet, honest quality label. Findings are no longer locationless oracles; the tool can point back into the artifacts.
+
 **Working surfaces:**
 - CLI: `./samediff left.md right.md` (auto-builds if stale)
 - Browser: `npm run dev` or live at GitHub Pages
-- Tests: 14 engine tests + 77 CLI integration tests, all passing
+- Tests: 20 engine tests + 88 CLI integration tests, all passing
 
 **Repo-level configuration:**
 - `.samediff.json` (walked up from cwd; stops at `$HOME` / filesystem root) declares a repo's drift contract
@@ -53,9 +55,184 @@ The core analysis engine in `src/analysis/` is shared between both surfaces. It 
 **Example spectrum (examples/):**
 01-modal-shift → 02-todo-drift → 03-api-contract → 04-prompt-policy → 05-hydra-doc-drift
 
-**Test counts:** 14 engine tests + 77 CLI integration tests, all passing
+**Test counts:** 20 engine tests + 88 CLI integration tests, all passing
 
 ## Devlog
+
+### 2026-04-16 (session 6) — Finding provenance / source anchoring
+
+Findings now tell you *where* they came from. Before this session the
+tool could say "commitment narrowed"; it couldn't say "on line 14 of
+before.md and line 20 of after.md." That gap made the tool feel like
+an oracle instead of an instrument, and blocked every downstream surface
+(GitHub annotations, future SARIF, PR review UX) from pointing users at
+the right lines. Version 0.5.0.
+
+**What we built:**
+- New `SourceAnchor` and `FindingProvenance` types in `src/analysis/types.ts`
+- `src/analysis/provenance.ts` — a small pure module:
+  - `buildLineIndex(text)` — offset→line lookup, O(n) once
+  - `findAnchor(text, idx, query, side, label?)` — exact substring match
+    with a whitespace/case-insensitive fallback
+  - `anchorOnSide` / `anchorBothSides` — the high-level helpers
+  - `formatAnchor` / `formatProvenance` — concise human formatters
+    (`@ before:2 after:2`)
+- Enrichment in `analyzeTextPair`: after the heuristics engine returns,
+  the pipeline post-processes each finding by searching the evidence
+  text inside the original sources and attaches a `provenance` field.
+  The engine itself was not touched.
+- DiffResult's finding types each gain a `provenance: FindingProvenance | null`
+  field. The field is always present (null when unlocatable) so consumers
+  don't have to key-check.
+- Renderers updated:
+  - Terminal: concise `@ before:L after:L` suffix on the metadata/trigger
+    line under each finding. Drops gracefully to nothing when no anchors.
+  - `--compact`: optional third tab field (`\t@before:L after:L`),
+    preserving machine-parsability.
+  - `--json`: full structured provenance on every finding.
+  - `--github`: after-side line numbers become `line=`/`endLine=`/`col=`
+    fields on the annotation command, so findings show up inline in PR
+    checks at the right region instead of at file top.
+- Filter pipeline extended to filter the action-item provenance sidecars
+  alongside the action-item lists, so `--json` never surfaces stale
+  provenance entries.
+- Version bump 0.4 → 0.5.0 (in `package.json` + `resultModel.ts`).
+
+**The provenance model (honest by design):**
+```ts
+type AnchorQuality = "exact" | "approximate" | "derived";
+
+type SourceAnchor = {
+  side: "before" | "after";
+  startLine?: number; endLine?: number;
+  startColumn?: number; endColumn?: number;
+  snippet?: string; label?: string;
+  quality?: AnchorQuality;
+};
+
+type FindingProvenance = {
+  anchors: SourceAnchor[];
+  quality?: AnchorQuality;
+  note?: string;
+};
+```
+
+- `exact` — evidence text found verbatim in the source
+- `approximate` — found only after whitespace-collapse + case-fold
+- `derived` — inferred (reserved; not emitted yet)
+- Unlocatable → `provenance: null`. No invented numbers.
+
+Lines and columns are 1-based. Multi-line matches get a proper
+`startLine`/`endLine` span; `startColumn`/`endColumn` bracket the
+literal match when available.
+
+**Where provenance is populated:**
+| Finding | Sides attempted | Source |
+| --- | --- | --- |
+| commitment shift | before + after | `versionA` → before, `versionB` → after |
+| contradiction | before + after | same |
+| concept rename | before + after (or one if the other is absent) | same |
+| added concept | after only | `sourceClause` → after |
+| removed concept | before only | `sourceClause` → before |
+| action item added | after only | description string → after |
+| action item removed | before only | description string → before |
+
+**Key decisions & why:**
+
+- **Post-process in `analyzeTextPair`, not inside the heuristics engine.**
+  The engine is battle-tested and shared with the browser UI. Adding a
+  second pass at the pipeline boundary keeps the invariant "heuristics
+  are source-of-truth for what's a finding; provenance is enrichment."
+  Also makes future provenance improvements (AST-based, token-window,
+  etc.) a single-file change.
+
+- **Text search via `indexOf` + whitespace-fuzzy fallback, not a
+  parser.** We avoided a major parser rebuild. The existing evidence
+  already contains the raw unit text; searching it in source is cheap
+  and reliably lands on the right line. Approximate quality is labeled
+  honestly.
+
+- **Use the *original* (untrimmed) source text for line numbers.**
+  `analyzeTextPair` trims internally for heuristics, but we index the
+  pre-trim text so line numbers match what the user sees in their editor.
+  Worth the extra pointer.
+
+- **Action item provenance lives in a *sidecar* (`actionItemsAddedProvenance`),
+  not on the strings themselves.** The existing `actionItemsAdded: string[]`
+  shape is part of the public contract used by the browser UI and by the
+  feedback issue body; changing it to an object array would break consumers.
+  Sidecar maps keyed by description preserve the existing shape and let
+  renderers opt in.
+
+- **`provenance: null` on finding types, not `provenance?`.** Always-
+  present, nullable. Means consumers can write `finding.provenance?.anchors`
+  without a `"provenance" in f` check. Small ergonomic win.
+
+- **GitHub annotations only use after-side anchors.** The `file=` field
+  on annotations targets the right-hand file; pinning a removed-concept
+  (which only exists in the before file) to a line in the after file
+  would be misleading. We pin when we can and fall back to file-top when
+  we can't.
+
+- **Anchor length is snippet-truncated to 120 chars.** Longer snippets
+  bloat JSON output; 120 chars is enough context for a human to
+  recognize the region. Full text is still available under `evidence`.
+
+- **No columns in human output.** `@ before:2 after:2` reads cleanly in
+  a terminal; adding columns (`@ before:2:1-2:51`) would add noise for
+  prose comparison where columns rarely matter. Columns are still in
+  JSON for SARIF-ready consumers.
+
+- **Fingerprints for baselines do NOT include provenance.** Line
+  numbers drift as files evolve; if baseline fingerprints depended on
+  them, a single edit above a finding would invalidate the whole
+  baseline. Fingerprinting stays text-based.
+
+**Why provenance before SARIF / directory mode / PR bot:**
+
+Those follow-ons all *consume* provenance. SARIF needs `physicalLocation`
+with line ranges. A PR-comment bot wants `line=` + snippet. Directory
+mode wants to label cross-file findings. Building any of them without
+anchors would have forced a rewrite later. This is the load-bearing
+spine feature; everything downstream gets meaningfully more useful now.
+
+**Tests added (17 total: 6 engine + 11 CLI, total now 108):**
+- Commitment shifts carry dual before+after anchors
+- Added concepts anchor only on after; removed concepts only on before
+- Action item provenance sidecar has the right sides
+- Missing-evidence case doesn't crash or invent anchors
+- Anchor line numbers match actual source line content (end-to-end)
+- `--json` provenance shape (sides, lines, columns, snippet, quality)
+- `--compact` anchor tab field present when anchors exist, absent otherwise
+- Terminal output shows `@ before:L after:L` suffix
+- `--github` includes `line=` on after-anchored findings
+- `--github` omits `line=` for before-only removed concepts
+
+**Paths worth following next:**
+
+1. **SARIF 2.1.0 export.** The provenance model maps almost 1:1 onto
+   SARIF's `locations` / `physicalLocation` / `region` — it's now
+   a mechanical renderer on top of DiffResult.
+
+2. **Column-level snippet highlighting in `--github`.** Currently we
+   set `line=`/`endLine=`/`col=`. Adding `endColumn=` would let GitHub
+   highlight the exact drift region, not the whole line.
+
+3. **Anchor-aware terminal UI.** A `--show-snippets` flag that prints
+   the 1–3 lines around each anchor, with the matched span highlighted,
+   would make the default output much more inspectable. The snippet
+   field is already there.
+
+4. **AST / markdown-structure anchoring.** For markdown specifically,
+   anchors could point at header paths (`## API contracts > Retries`)
+   instead of just line numbers — more robust against reflowing.
+   Starts paying off when combined with directory mode.
+
+5. **Anchor stability under whitespace edits.** Today, a trailing-
+   whitespace edit doesn't break anchoring (fuzzy fallback), but
+   paragraph reflows can cause "approximate" matches. A diff-aware
+   anchor could use the pre-existing heuristic unit matcher as ground
+   truth.
 
 ### 2026-04-16 (session 5) — Repo-level policy/config canonization
 

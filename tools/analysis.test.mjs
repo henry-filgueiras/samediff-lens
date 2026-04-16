@@ -275,6 +275,153 @@ test("feedback issue body includes example, summary, and fired categories withou
   assert.doesNotMatch(body, /The system retries only idempotent jobs up to 3 times with jitter/);
 });
 
+// ── Provenance / source anchoring ────────────────────────────────────
+
+test("commitment shifts carry dual (before + after) line anchors", () => {
+  const before = [
+    "Preface line.",
+    "The service may cache responses for performance.",
+    "Clients should validate tokens before each request.",
+  ].join("\n");
+  const after = [
+    "Preface line.",
+    "The service must cache responses for performance.",
+    "Clients must validate tokens before each request.",
+  ].join("\n");
+
+  const result = analyzeTextPair(before, after);
+  assert.ok(result.changedCommitmentsEvidence.length >= 1);
+  for (const ev of result.changedCommitmentsEvidence) {
+    assert.ok(ev.provenance, "commitment shift should have provenance");
+    const sides = ev.provenance.anchors.map((a) => a.side).sort();
+    assert.deepEqual(sides, ["after", "before"]);
+    for (const a of ev.provenance.anchors) {
+      assert.equal(typeof a.startLine, "number");
+      assert.ok(a.startLine >= 1);
+      assert.equal(typeof a.endLine, "number");
+    }
+    assert.ok(["exact", "approximate"].includes(ev.provenance.quality));
+  }
+});
+
+test("added concepts anchor only on the after side", () => {
+  const before = "The system handles retries.";
+  const after = [
+    "The system handles retries.",
+    "Jobs must be idempotent and use exponential backoff.",
+  ].join("\n");
+
+  const result = analyzeTextPair(before, after);
+  assert.ok(result.addedConceptsEvidence.length > 0);
+  for (const ev of result.addedConceptsEvidence) {
+    if (!ev.provenance) continue;
+    const sides = ev.provenance.anchors.map((a) => a.side);
+    assert.deepEqual(sides, ["after"]);
+    assert.ok(ev.provenance.anchors[0].startLine >= 1);
+  }
+});
+
+test("removed concepts anchor only on the before side", () => {
+  const before = [
+    "The system handles retries.",
+    "Jobs must be idempotent and use exponential backoff.",
+  ].join("\n");
+  const after = "The system handles retries.";
+
+  const result = analyzeTextPair(before, after);
+  assert.ok(result.removedConceptsEvidence.length > 0);
+  for (const ev of result.removedConceptsEvidence) {
+    if (!ev.provenance) continue;
+    const sides = ev.provenance.anchors.map((a) => a.side);
+    assert.deepEqual(sides, ["before"]);
+  }
+});
+
+test("action item drift produces side-appropriate provenance sidecar", () => {
+  const before = [
+    "# Plan",
+    "- [ ] benchmark against GMP",
+    "- [ ] write docs",
+  ].join("\n");
+  const after = [
+    "# Plan",
+    "- [ ] benchmark against GMP",
+    "- [ ] validate karatsuba threshold",
+  ].join("\n");
+
+  const result = analyzeTextPair(before, after);
+  assert.ok(result.actionItemsAdded.length > 0);
+  assert.ok(result.actionItemsRemoved.length > 0);
+  assert.ok(Array.isArray(result.actionItemsAddedProvenance));
+  assert.ok(Array.isArray(result.actionItemsRemovedProvenance));
+  // Each sidecar entry pairs a description with optional provenance
+  for (const e of result.actionItemsAddedProvenance) {
+    if (e.provenance) {
+      assert.deepEqual(
+        e.provenance.anchors.map((a) => a.side),
+        ["after"],
+      );
+    }
+  }
+  for (const e of result.actionItemsRemovedProvenance) {
+    if (e.provenance) {
+      assert.deepEqual(
+        e.provenance.anchors.map((a) => a.side),
+        ["before"],
+      );
+    }
+  }
+});
+
+test("missing evidence text does not crash or invent anchors", () => {
+  // Two texts where commitment shift evidence is genuine. Then strip the
+  // source texts down so we simulate a "can't locate" scenario — we do
+  // this by passing one text twice which yields no findings, and by
+  // checking that absent provenance is gracefully absent.
+  const result = analyzeTextPair("hello world", "hello world");
+  for (const arr of [
+    result.changedCommitmentsEvidence,
+    result.possibleContradictionsEvidence,
+    result.addedConceptsEvidence,
+    result.removedConceptsEvidence,
+  ]) {
+    for (const ev of arr ?? []) {
+      // No crash on access; provenance is either set or undefined
+      if (ev.provenance !== undefined) {
+        assert.ok(Array.isArray(ev.provenance.anchors));
+      }
+    }
+  }
+});
+
+test("anchor line numbers match actual source lines", () => {
+  const before = [
+    "Line 1 preamble.",
+    "Line 2 preamble.",
+    "Line 3 preamble.",
+    "Clients should validate tokens before each request.",
+    "Line 5 postamble.",
+  ].join("\n");
+  const after = [
+    "Line 1 preamble.",
+    "Line 2 preamble.",
+    "Line 3 preamble.",
+    "Line 4 insert.",
+    "Clients must validate tokens before each request.",
+    "Line 6 postamble.",
+  ].join("\n");
+
+  const result = analyzeTextPair(before, after);
+  const commitment = result.changedCommitmentsEvidence.find((e) =>
+    /validate tokens/.test(e.versionB),
+  );
+  assert.ok(commitment, "expected a commitment shift finding");
+  const beforeAnchor = commitment.provenance.anchors.find((a) => a.side === "before");
+  const afterAnchor = commitment.provenance.anchors.find((a) => a.side === "after");
+  assert.equal(beforeAnchor.startLine, 4, "before anchor line 4");
+  assert.equal(afterAnchor.startLine, 5, "after anchor line 5");
+});
+
 test("feedback issue URL encodes a prefilled GitHub issue", () => {
   const url = buildFeedbackIssueUrl({
     result: analyzeTextPair(
@@ -295,6 +442,7 @@ function compileAnalysisModules() {
   const sourceFiles = [
     resolve(repoRoot, "src/analysis/analyzeTextPair.ts"),
     resolve(repoRoot, "src/analysis/heuristics.ts"),
+    resolve(repoRoot, "src/analysis/provenance.ts"),
     resolve(repoRoot, "src/analysis/types.ts"),
     resolve(repoRoot, "src/examples/goldenExamples.ts"),
     resolve(repoRoot, "src/lib/feedback.ts"),

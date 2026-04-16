@@ -189,6 +189,59 @@ samediff a.md b.md --json             # canonical structured result
 
 The `--json` output includes an additive `policy` block when a config/policy shaped the run, plus a `filters` block with baseline provenance. Schema version is stable at `"1"`.
 
+---
+
+## Source anchoring
+
+SameDiff Lens points findings back to where they came from. Every finding carries structured **provenance**: which side of the comparison it came from, which line range, and — when available — the matching snippet.
+
+Terminal output shows a concise anchor suffix on each finding:
+
+```
+COMMITMENT SHIFTS
+  - Clients should validate tokens before each request
+  + Clients must validate tokens before each request
+    strengthens the commitment  @ before:2 after:2
+
+ADDED CONCEPTS
+  + required for all production
+    @ after:3
+```
+
+`--compact` appends an anchor tab field:
+
+```
+COMMITMENT	Clients should validate tokens… → Clients must validate tokens…	@ before:2 after:2
+ADDED	required for all production	@ after:3
+```
+
+`--json` finds carry a full `provenance` object:
+
+```jsonc
+{
+  "type": "commitment-shift",
+  "summary": "...",
+  "evidence": { "before": "...", "after": "...", "triggers": ["..."] },
+  "provenance": {
+    "anchors": [
+      { "side": "before", "startLine": 2, "endLine": 2,
+        "startColumn": 1, "endColumn": 51,
+        "snippet": "Clients should validate tokens before each request",
+        "quality": "exact" },
+      { "side": "after", "startLine": 2, "endLine": 2,
+        "startColumn": 1, "endColumn": 49,
+        "snippet": "Clients must validate tokens before each request",
+        "quality": "exact" }
+    ],
+    "quality": "exact"
+  }
+}
+```
+
+`--github` uses after-side anchors to pin annotations to the exact line in the right-hand file, so findings show up inline in PR checks next to the affected text — not at the top of the file.
+
+Quality labels are honest: `"exact"` when the evidence was found verbatim, `"approximate"` when located only after whitespace/case normalization, `"derived"` when the anchor was inferred from higher-level matching. Findings that can't be located carry `provenance: null` rather than inventing a line number.
+
 ## Browser UI
 
 - [Live demo](https://henry-filgueiras.github.io/samediff-lens/)

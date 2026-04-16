@@ -321,6 +321,17 @@ export function applyFilters(
       })
     : result.summary;
 
+  // Filter the action-item provenance sidecars to match the filtered
+  // action-item lists — otherwise consumers see stale provenance entries.
+  const keptAdded = new Set(actionItemsAdded);
+  const keptRemoved = new Set(actionItemsRemoved);
+  const actionItemsAddedProvenance = (result.actionItemsAddedProvenance ?? []).filter(
+    (p) => keptAdded.has(p.description),
+  );
+  const actionItemsRemovedProvenance = (result.actionItemsRemovedProvenance ?? []).filter(
+    (p) => keptRemoved.has(p.description),
+  );
+
   const filtered: AnalysisResult = {
     ...result,
     changedCommitmentsEvidence,
@@ -330,6 +341,8 @@ export function applyFilters(
     removedConceptsEvidence,
     actionItemsAdded,
     actionItemsRemoved,
+    actionItemsAddedProvenance,
+    actionItemsRemovedProvenance,
     addedConcepts,
     removedConcepts,
     changedCommitments,
