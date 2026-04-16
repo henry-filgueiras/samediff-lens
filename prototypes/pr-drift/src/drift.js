@@ -14,6 +14,18 @@ const DEP_FILES = new Set([
   'pom.xml', 'build.gradle', 'build.gradle.kts',
 ]);
 
+const SOURCE_EXT = /\.(jsx?|tsx?|mjs|cjs|py|go|rb|rs|java|kt|c|cc|cpp|cs|php|swift|scala)$/i;
+
+const INFRA_PATTERNS = [
+  /^\.github\//,
+  /^\.circleci\//,
+  /^\.gitlab-ci\.yml$/,
+  /(^|\/)Dockerfile(\..+)?$/,
+  /(^|\/)docker-compose(\..+)?\.ya?ml$/,
+  /^k8s\//, /^kubernetes\//, /^helm\//, /^terraform\//, /^ansible\//,
+  /(^|\/)Jenkinsfile$/,
+];
+
 const SKIP_SEGMENTS = new Set([
   'src', 'lib', 'app', 'apps', 'packages', 'pkg', 'internal', 'cmd',
 ]);
@@ -29,6 +41,9 @@ function isTestPath(p) {
 
 // Pick the most meaningful directory segment from a file path.
 // `src/auth/jwt.js` -> `auth`, `package.json` -> null, `tests/foo.js` -> `tests`.
+// When every directory segment is skip-listed (e.g. `src/lib/cache.ts`),
+// fall back to the filename stem so the file still claims a domain — otherwise
+// a whole new source module slips through with no attributed domain at all.
 function pathDomain(filePath) {
   const parts = filePath.split('/');
   if (parts.some(p => TEST_SEGMENTS.has(p)) || /\.(test|spec)\.[jt]sx?$/.test(parts[parts.length - 1])) {
@@ -38,6 +53,13 @@ function pathDomain(filePath) {
     const p = parts[i];
     if (SKIP_SEGMENTS.has(p)) continue;
     return canonicalDomain(p.toLowerCase().replace(/[^\w-]/g, ''));
+  }
+  if (parts.length > 1) {
+    const stem = parts[parts.length - 1]
+      .replace(/\.[^.]+$/, '')
+      .toLowerCase()
+      .replace(/[^\w-]/g, '');
+    if (stem) return canonicalDomain(stem);
   }
   return null;
 }
@@ -74,14 +96,16 @@ function computeDrift({ intent, files, title, body }) {
   const signals = [];
   let score = 0;
 
-  // 1. Paths touch a domain the PR text never mentions.
+  // 1. Paths touch a domain the PR text never mentions. Fires even on a
+  // single-domain mismatch — a "fix typo" PR that touches `src/payments/**`
+  // without saying "payments" anywhere is already worth flagging.
   const unmentionedDomains = touchedDomains.filter(d => !isMentioned(d));
-  if (unmentionedDomains.length > 0 && touchedDomains.length > 1) {
-    const weight = Math.min(0.4, 0.12 * unmentionedDomains.length);
+  if (unmentionedDomains.length > 0) {
+    const weight = Math.min(0.4, 0.15 + 0.12 * (unmentionedDomains.length - 1));
     score += weight;
     signals.push({
       kind: 'unmentioned-domain',
-      severity: weight >= 0.24 ? 'high' : 'med',
+      severity: weight >= 0.27 ? 'high' : 'med',
       detail: `Touches ${quote(unmentionedDomains)} but the PR text never mentions ${unmentionedDomains.length > 1 ? 'them' : 'it'}.`,
     });
   }
@@ -139,6 +163,35 @@ function computeDrift({ intent, files, title, body }) {
       kind: 'feature-no-new-files',
       severity: 'med',
       detail: 'Labelled "feature" but no new files were added. Might be a tweak to an existing surface — verify the framing.',
+    });
+  }
+
+  // 6b. Bugfix / chore / docs / typo-style PR that nonetheless ships new
+  // source modules. Real fixes usually edit existing code.
+  if (['bugfix', 'chore', 'docs'].includes(intent.type)) {
+    const sourceAdds = files.filter(f =>
+      f.status === 'add' && !isTestPath(f.path) && SOURCE_EXT.test(f.path),
+    );
+    if (sourceAdds.length > 0) {
+      const weight = Math.min(0.3, 0.15 + 0.05 * (sourceAdds.length - 1));
+      score += weight;
+      signals.push({
+        kind: 'bugfix-adds-source-file',
+        severity: sourceAdds.length > 2 ? 'high' : 'med',
+        detail: `Labelled "${intent.type}" but adds ${sourceAdds.length} new source file(s): ${sourceAdds.map(f => f.path).join(', ')}. Fixes usually modify existing code.`,
+      });
+    }
+  }
+
+  // 6c. CI/infra files touched without any mention in the PR text.
+  const infraFiles = files.filter(f => INFRA_PATTERNS.some(p => p.test(f.path)));
+  const mentionsInfra = /\b(ci|cd|pipeline|workflow|workflows|infra|infrastructure|deploy|deployment|docker|kubernetes|k8s|terraform|helm|ansible|jenkins|github actions)\b/i.test(text);
+  if (infraFiles.length > 0 && !mentionsInfra) {
+    score += 0.15;
+    signals.push({
+      kind: 'silent-infra',
+      severity: 'med',
+      detail: `CI/infra file(s) changed (${infraFiles.map(f => f.path).join(', ')}) but the PR text says nothing about CI, deploy, or infra.`,
     });
   }
 
