@@ -2,77 +2,178 @@
 
 SameDiff Lens surfaces the kinds of semantic changes that raw line diff misses: commitment shifts, task drift, concept renames, and possible contradictions. No LLM, no cloud, no embeddings — just deterministic heuristics you can inspect.
 
+A repo can declare a **semantic-drift policy** in `.samediff.json` and enforce it consistently in CI and local workflows.
+
 Feedback on false positives, false negatives, and confusing outputs is welcome via GitHub issues.
 
-## CLI — try it in 10 seconds
+## Three workflows
+
+SameDiff is designed around three shapes of work. Each has a named path.
+
+### 1. Local exploratory diff
+
+Scratch-pad mode. What actually changed between two versions of a doc?
 
 ```bash
 npm install && npm run build:cli
-npm run samediff -- examples/01-modal-shift/left.md examples/01-modal-shift/right.md
+samediff before.md after.md
 ```
 
-Options at a glance: `--md`, `--html`, `--json`, `--compact`, `--github`, `--stats`, `--score`. Use `--help` for the full usage.
+Quick variants:
+
+```bash
+samediff before.md after.md --only contradictions   # focus
+samediff before.md after.md --compact               # grep-friendly lines
+samediff before.md after.md --md -o review.md       # shareable report
+cat draft.md | samediff - reference.md              # stdin piping
+samediff --git HEAD~1 -- spec.md                    # diff against git
+```
 
 There are five example pairs in `examples/`, from simple to advanced — see [examples/README.md](examples/README.md).
 
-### Structured JSON output
+### 2. CI with baseline-aware gating
+
+You want CI to enforce a drift contract: commitment shifts and contradictions must be flagged, concept churn can pass. You declare the contract once and check it in.
 
 ```bash
-npm run samediff -- fileA.md fileB.md --json
-npm run samediff -- --git main -- spec.md --json
-npm run samediff -- fileA.md fileB.md --json -o result.json
+# One-time setup in your repo
+samediff init                              # writes .samediff.json
+samediff baseline docs/spec.md docs/spec.md   # writes .samediff-baseline.json
+                                             # (use any two references you trust)
+git add .samediff.json .samediff-baseline.json
 ```
 
-The `--json` flag emits a stable, machine-readable representation of the analysis — the canonical result contract that CI integrations, PR comment bots, and future UIs can build on. Only valid JSON is written to stdout; diagnostics go to stderr.
-
-### CI gating: `--fail-on`
-
-Precise exit-code control — no more fighting a fixed threshold:
+In CI:
 
 ```bash
-samediff a.md b.md --fail-on score:5               # fail if drift ≥ 5/10
-samediff a.md b.md --fail-on contradictions        # fail on any contradiction
-samediff a.md b.md --fail-on commitment-shifts,contradictions
-samediff a.md b.md --fail-on any                   # fail on any finding
+samediff --git origin/main -- docs/spec.md
+# the config's default_policy kicks in automatically
+# non-zero exit => CI fails on the defined contract
 ```
 
-### Gradual adoption: `--baseline`
+No flags — policy comes from the checked-in config. Local developers see the same behavior because the config is in-tree.
 
-Snapshot today's drift and only fail on NEW drift from then on:
+### 3. Gradual adoption (only new drift fails)
+
+For repos with existing drift you don't want to fix right now. "Don't yell at me about yesterday's drift. Tell me what I'm adding today."
 
 ```bash
-# Record current state once
-samediff --git main -- spec.md --json -o .samediff-baseline.json
-
-# In CI, ignore pre-existing findings — only flag what's new
-samediff --git main -- spec.md \
-  --baseline .samediff-baseline.json \
-  --fail-on any
+samediff init                                 # default_policy = adoption
+samediff baseline docs/spec.md docs/spec.md   # snapshot current state
 ```
 
-The baseline is subtracted from both the findings list **and** the drift score, so CI won't yell at you about drift that was already there.
+Now every run uses the `adoption` built-in policy, which:
 
-### Focus mode: `--only` / `--exclude`
+- subtracts the baseline from both findings and drift score
+- fails only on **new** drift ≥ moderate severity (`score:4`)
+- focuses on the dangerous categories (commitment shifts, contradictions)
 
-Filter categories; score and output are recomputed from the filtered view.
+In CI:
 
 ```bash
-samediff a.md b.md --only contradictions
-samediff a.md b.md --exclude concepts --compact
+samediff --git origin/main -- docs/spec.md
+# passes if your change didn't make drift worse than the baseline
 ```
 
-Category names: `commitment-shifts`, `contradictions`, `concept-renames`, `added-concepts`, `removed-concepts`, `action-items-added`, `action-items-removed`. Handy aliases: `commits`, `concepts`, `todos`, `all`.
+As drift gets cleaned up, update the baseline (`samediff baseline …`) and the ratchet tightens.
 
-### Pipe-friendly formats
+---
+
+## Config file (`.samediff.json`)
+
+`samediff init` writes a starter that looks like this:
+
+```json
+{
+  "default_policy": "adoption",
+  "policies": {
+    "adoption": {
+      "baseline": ".samediff-baseline.json",
+      "include": ["commitment-shifts", "contradictions"],
+      "fail_on": "score:4"
+    },
+    "strict": { "fail_on": "commitment-shifts,contradictions" },
+    "advisory": { "fail_on": null }
+  }
+}
+```
+
+SameDiff walks up from the current directory to find `.samediff.json` (stopping at `$HOME` or the filesystem root). Use `--config <path>` to override, or `--no-config` to disable.
+
+### Built-in policies
+
+Always available, even without a config file:
+
+| Policy | Use when | Behavior |
+| ------ | -------- | -------- |
+| `adoption` | Messy or newly onboarded repo | Uses `.samediff-baseline.json`; fails only on NEW drift (score ≥ 4) in commits / contradictions |
+| `strict` | Mature repo that's paid down drift debt | Fails on any commitment shift or contradiction. No baseline. |
+| `docs-only` | Design docs / essays / prose repos | Focuses on commits, contradictions, concepts, todos; fails at score ≥ 5 |
+| `advisory` | PR comment / annotation bot | Reports only; never fails the build |
+
+List them anywhere: `samediff policies`.
+
+### Precedence
+
+Effective options are merged from four layers, highest wins:
+
+1. Explicit CLI flags (`--fail-on`, `--only`, `--baseline`, …)
+2. Selected policy (via `--policy <name>` or `default_policy` in config)
+3. Top-level config block (`baseline`, `include`, `exclude`, `fail_on`, …)
+4. Built-in defaults
+
+Array fields (`include`, `exclude`) **replace** across layers — they do not union. If a policy sets `include: ["commits"]` and you pass `--only concepts`, the effective include is `["concepts"]` alone.
+
+`fail_on: null` (or `"none"` / `"never"`) means "never fail the build" — that's how `advisory` works, and it's what `--fail-on none` does from the CLI.
+
+### Named policies in the config
+
+You can add or override any policy in the config:
+
+```json
+{
+  "default_policy": "my-repo-policy",
+  "policies": {
+    "my-repo-policy": {
+      "baseline": ".samediff-baseline.json",
+      "include": ["commitment-shifts", "contradictions", "action-items-added"],
+      "exclude": ["concept-renames"],
+      "fail_on": "score:5"
+    }
+  }
+}
+```
+
+Built-in names (`adoption`, `strict`, `docs-only`, `advisory`) can be redefined in your config — your version wins. `samediff policies` shows `(override)` next to those.
+
+---
+
+## All the flags
+
+Use `samediff --help` for the full list. Grouped here for reference:
+
+**Output formats:** `--md`, `--html`, `--json`, `--compact`, `--github`, `--stats`, `--score`, `-o <file>`
+
+**Focus / noise:** `--only`, `--exclude`, `--baseline`, `--no-baseline`
+
+**CI gating:** `--fail-on any|score:N|<cats>|none`, `--exit-code` (legacy)
+
+**Config / policy:** `--config <path>`, `--no-config`, `--policy <name>`, `--no-policy`
+
+**Subcommands:** `samediff init`, `samediff policies`, `samediff baseline <left> <right>`, `samediff check <left> <right>`
+
+**Inputs:** `<left> <right>`, `- <right>` or `<left> -` (stdin), `--git <ref> -- <file>`
+
+### Pipe-friendly outputs
 
 ```bash
-samediff a.md b.md --compact          # one finding per line (grep/awk friendly)
+samediff a.md b.md --compact          # one finding per line (CATEGORY\tdetail)
 samediff a.md b.md --stats            # one-line key=value counts
-samediff a.md b.md --github           # ::error/warning/notice:: workflow commands
-echo "draft text" | samediff - ref.md # stdin support via '-'
+samediff a.md b.md --github           # GitHub Actions annotations
+samediff a.md b.md --json             # canonical structured result
 ```
 
-`--github` emits GitHub Actions workflow commands so findings show up inline in PR checks with zero extra tooling.
+The `--json` output includes an additive `policy` block when a config/policy shaped the run, plus a `filters` block with baseline provenance. Schema version is stable at `"1"`.
 
 ## Browser UI
 

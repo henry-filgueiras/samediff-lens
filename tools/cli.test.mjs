@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, cpSync } from "node:fs";
 import { tmpdir } from "node:os";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -13,8 +13,11 @@ const afterFile = resolve(repoRoot, "examples/05-hydra-doc-drift/right.md");
 const simpleLeft = resolve(repoRoot, "examples/01-modal-shift/left.md");
 const simpleRight = resolve(repoRoot, "examples/01-modal-shift/right.md");
 
+// Always pass --no-config in the default runner so tests don't pick up
+// a real .samediff.json from the user's machine. Tests that want config
+// behavior use runIn() with an explicit tmp cwd.
 function run(...args) {
-  return execFileSync("node", [cli, ...args], {
+  return execFileSync("node", [cli, ...args, "--no-config"], {
     cwd: repoRoot,
     encoding: "utf-8",
     env: { ...process.env, NO_COLOR: "1" },
@@ -22,11 +25,26 @@ function run(...args) {
 }
 
 function runRaw(...args) {
-  return execFileSync("node", [cli, ...args], {
+  return execFileSync("node", [cli, ...args, "--no-config"], {
     cwd: repoRoot,
     encoding: "utf-8",
     env: { ...process.env },
   });
+}
+
+function runIn(cwd, ...args) {
+  return execFileSync("node", [cli, ...args], {
+    cwd,
+    encoding: "utf-8",
+    env: { ...process.env, NO_COLOR: "1" },
+  });
+}
+
+function mkRepo() {
+  const dir = mkdtempSync(resolve(tmpdir(), "samediff-cfg-"));
+  cpSync(simpleLeft, resolve(dir, "left.md"));
+  cpSync(simpleRight, resolve(dir, "right.md"));
+  return dir;
 }
 
 test("--help prints usage", () => {
@@ -656,4 +674,346 @@ test("--json schema shape is stable (snapshot fields)", () => {
     "commitmentShifts", "conceptRenames", "contradictions",
     "removedConcepts",
   ]);
+});
+
+// ─── Config + policy tests ──────────────────────────────────────────
+
+test("policies subcommand lists built-ins when no config is found", () => {
+  const dir = mkdtempSync(resolve(tmpdir(), "samediff-policies-"));
+  try {
+    const out = runIn(dir, "policies");
+    assert.match(out, /No config file found/);
+    assert.match(out, /adoption\s+\(built-in\)/);
+    assert.match(out, /strict\s+\(built-in\)/);
+    assert.match(out, /advisory\s+\(built-in\)/);
+    assert.match(out, /docs-only\s+\(built-in\)/);
+  } finally {
+    rmSync(dir, { force: true, recursive: true });
+  }
+});
+
+test("init writes a starter .samediff.json", () => {
+  const dir = mkRepo();
+  try {
+    runIn(dir, "init");
+    const cfgPath = resolve(dir, ".samediff.json");
+    assert.ok(existsSync(cfgPath), ".samediff.json should exist");
+    const cfg = JSON.parse(readFileSync(cfgPath, "utf-8"));
+    assert.equal(cfg.default_policy, "adoption");
+    assert.ok(cfg.policies.adoption);
+    assert.ok(cfg.policies.strict);
+    assert.ok(cfg.policies.advisory);
+  } finally {
+    rmSync(dir, { force: true, recursive: true });
+  }
+});
+
+test("init refuses to overwrite without --force", () => {
+  const dir = mkRepo();
+  try {
+    runIn(dir, "init");
+    try {
+      runIn(dir, "init");
+      assert.fail("Expected exit 1 on existing config");
+    } catch (err) {
+      assert.equal(err.status, 1);
+      assert.match(err.stderr ?? err.message, /already exists/);
+    }
+    // --force should succeed
+    runIn(dir, "init", "--force");
+  } finally {
+    rmSync(dir, { force: true, recursive: true });
+  }
+});
+
+test("--policy strict fails on commitment shifts", () => {
+  try {
+    execFileSync(
+      "node",
+      [cli, simpleLeft, simpleRight, "--policy", "strict", "--stats", "--no-config"],
+      { cwd: repoRoot, encoding: "utf-8", env: { ...process.env, NO_COLOR: "1" } },
+    );
+    assert.fail("Expected --policy strict to fail");
+  } catch (err) {
+    assert.equal(err.status, 1);
+    assert.match(err.stderr ?? err.message, /commitment-shifts/);
+  }
+});
+
+test("--policy advisory never fails the build", () => {
+  // Should not throw
+  execFileSync(
+    "node",
+    [cli, simpleLeft, simpleRight, "--policy", "advisory", "--stats", "--no-config"],
+    { cwd: repoRoot, encoding: "utf-8", env: { ...process.env, NO_COLOR: "1" } },
+  );
+});
+
+test("--policy unknown exits with code 2 and a clear message", () => {
+  try {
+    run(simpleLeft, simpleRight, "--policy", "nonexistent-policy");
+    assert.fail("Expected error");
+  } catch (err) {
+    assert.equal(err.status, 2);
+    assert.match(err.stderr ?? err.message, /Unknown policy/);
+  }
+});
+
+test("adoption policy reports zero drift after baseline snapshot", () => {
+  const dir = mkRepo();
+  try {
+    runIn(dir, "init");
+    runIn(dir, "baseline", "left.md", "right.md");
+    const out = runIn(dir, "left.md", "right.md", "--stats");
+    assert.match(out, /score=0\.0/);
+    assert.match(out, /commitment-shifts=0/);
+    assert.match(out, /contradictions=0/);
+  } finally {
+    rmSync(dir, { force: true, recursive: true });
+  }
+});
+
+test("adoption policy without baseline warns and still runs", () => {
+  const dir = mkRepo();
+  try {
+    runIn(dir, "init");
+    try {
+      runIn(dir, "left.md", "right.md", "--stats");
+      assert.fail("Expected --fail-on score:4 to trigger");
+    } catch (err) {
+      assert.equal(err.status, 1);
+      assert.match(err.stderr ?? err.message, /baseline .* not found/i);
+      assert.match(err.stderr ?? err.message, /drift score/i);
+    }
+  } finally {
+    rmSync(dir, { force: true, recursive: true });
+  }
+});
+
+test("CLI --fail-on overrides policy fail_on", () => {
+  const dir = mkRepo();
+  try {
+    runIn(dir, "init"); // default_policy=adoption, fail_on=score:4
+    // Override with --fail-on none → must not fail
+    const out = runIn(dir, "left.md", "right.md", "--fail-on", "none", "--stats");
+    assert.match(out, /score=/);
+    // Also ensure --fail-on any DOES fail even with adoption policy
+    try {
+      runIn(dir, "left.md", "right.md", "--fail-on", "any", "--no-baseline", "--stats");
+      assert.fail("Expected --fail-on any + --no-baseline to fail");
+    } catch (err) {
+      assert.equal(err.status, 1);
+    }
+  } finally {
+    rmSync(dir, { force: true, recursive: true });
+  }
+});
+
+test("CLI --only overrides policy include", () => {
+  const dir = mkRepo();
+  try {
+    runIn(dir, "init");
+    // Adoption policy includes commits+contradictions. Override with --only concepts.
+    const out = runIn(dir, "left.md", "right.md", "--only", "concepts", "--stats", "--no-baseline");
+    assert.match(out, /commitment-shifts=0/);
+    assert.match(out, /added=\d+/);
+  } finally {
+    rmSync(dir, { force: true, recursive: true });
+  }
+});
+
+test("--no-config ignores a config file that exists on disk", () => {
+  const dir = mkRepo();
+  try {
+    runIn(dir, "init");
+    // With config: the provenance line would appear on stderr. Run again with --no-config.
+    const out = execFileSync(
+      "node",
+      [cli, "left.md", "right.md", "--no-config", "--stats"],
+      { cwd: dir, encoding: "utf-8", env: { ...process.env, NO_COLOR: "1" } },
+    );
+    // No --fail-on means exit 0 even though drift exists
+    assert.match(out, /commitment-shifts=2/);
+    assert.match(out, /contradictions=1/);
+  } finally {
+    rmSync(dir, { force: true, recursive: true });
+  }
+});
+
+test("--no-policy skips default_policy", () => {
+  const dir = mkRepo();
+  try {
+    runIn(dir, "init");
+    const out = runIn(dir, "left.md", "right.md", "--no-policy", "--stats");
+    // Without policy, all categories are shown; no fail-on; all pass
+    assert.match(out, /commitment-shifts=2/);
+    assert.match(out, /added=4/);
+  } finally {
+    rmSync(dir, { force: true, recursive: true });
+  }
+});
+
+test("--config <path> uses an explicit config", () => {
+  const dir = mkRepo();
+  const cfgDir = mkdtempSync(resolve(tmpdir(), "samediff-cfg-explicit-"));
+  const cfgPath = resolve(cfgDir, "custom.json");
+  writeFileSync(cfgPath, JSON.stringify({ default_policy: "advisory" }));
+  try {
+    const out = runIn(dir, "left.md", "right.md", "--config", cfgPath, "--stats");
+    // advisory = never fail → exit 0 and we see drift in output
+    assert.match(out, /score=5\.8/);
+  } finally {
+    rmSync(dir, { force: true, recursive: true });
+    rmSync(cfgDir, { force: true, recursive: true });
+  }
+});
+
+test("invalid config JSON errors with exit 2", () => {
+  const dir = mkRepo();
+  try {
+    writeFileSync(resolve(dir, ".samediff.json"), "{ not json }");
+    try {
+      runIn(dir, "left.md", "right.md");
+      assert.fail("Expected error");
+    } catch (err) {
+      assert.equal(err.status, 2);
+      assert.match(err.stderr ?? err.message, /Invalid JSON/);
+    }
+  } finally {
+    rmSync(dir, { force: true, recursive: true });
+  }
+});
+
+test("unknown category in config errors with exit 2", () => {
+  const dir = mkRepo();
+  try {
+    writeFileSync(
+      resolve(dir, ".samediff.json"),
+      JSON.stringify({ include: ["not-a-real-category"] }),
+    );
+    try {
+      runIn(dir, "left.md", "right.md");
+      assert.fail("Expected error");
+    } catch (err) {
+      assert.equal(err.status, 2);
+      assert.match(err.stderr ?? err.message, /Unknown category/);
+    }
+  } finally {
+    rmSync(dir, { force: true, recursive: true });
+  }
+});
+
+test("default_policy referencing an unknown policy errors", () => {
+  const dir = mkRepo();
+  try {
+    writeFileSync(
+      resolve(dir, ".samediff.json"),
+      JSON.stringify({ default_policy: "ghost-policy" }),
+    );
+    try {
+      runIn(dir, "left.md", "right.md");
+      assert.fail("Expected error");
+    } catch (err) {
+      assert.equal(err.status, 2);
+      assert.match(err.stderr ?? err.message, /default_policy.*not found/);
+    }
+  } finally {
+    rmSync(dir, { force: true, recursive: true });
+  }
+});
+
+test("config can override a built-in policy by redefining it", () => {
+  const dir = mkRepo();
+  try {
+    // Redefine 'strict' to be advisory-like
+    writeFileSync(
+      resolve(dir, ".samediff.json"),
+      JSON.stringify({
+        policies: { strict: { fail_on: null } },
+      }),
+    );
+    // --policy strict should now NOT fail
+    const out = runIn(dir, "left.md", "right.md", "--policy", "strict", "--stats");
+    assert.match(out, /score=/);
+  } finally {
+    rmSync(dir, { force: true, recursive: true });
+  }
+});
+
+test("policy shows up in --json output as `policy`", () => {
+  const dir = mkRepo();
+  try {
+    runIn(dir, "init");
+    // Pass --fail-on none so exit code stays 0 regardless of drift
+    const out = runIn(
+      dir,
+      "left.md",
+      "right.md",
+      "--json",
+      "--no-baseline",
+      "--fail-on",
+      "none",
+    );
+    const j = JSON.parse(out);
+    assert.ok(j.policy, "expected policy block on JSON output");
+    assert.equal(j.policy.name, "adoption");
+    assert.equal(j.policy.source, "default");
+    assert.match(j.policy.config, /\.samediff\.json$/);
+  } finally {
+    rmSync(dir, { force: true, recursive: true });
+  }
+});
+
+test("baseline subcommand writes a valid JSON baseline", () => {
+  const dir = mkRepo();
+  try {
+    runIn(dir, "baseline", "left.md", "right.md");
+    const baselinePath = resolve(dir, ".samediff-baseline.json");
+    assert.ok(existsSync(baselinePath));
+    const parsed = JSON.parse(readFileSync(baselinePath, "utf-8"));
+    assert.equal(parsed.version, "1");
+    assert.ok(parsed.findings);
+  } finally {
+    rmSync(dir, { force: true, recursive: true });
+  }
+});
+
+test("baseline subcommand respects -o path", () => {
+  const dir = mkRepo();
+  try {
+    runIn(dir, "baseline", "left.md", "right.md", "-o", "custom-baseline.json");
+    assert.ok(existsSync(resolve(dir, "custom-baseline.json")));
+  } finally {
+    rmSync(dir, { force: true, recursive: true });
+  }
+});
+
+test("check subcommand is an alias for bareword invocation", () => {
+  const bare = run(simpleLeft, simpleRight, "--stats");
+  const explicit = run("check", simpleLeft, simpleRight, "--stats");
+  assert.equal(bare, explicit);
+});
+
+test("--no-baseline overrides policy baseline", () => {
+  const dir = mkRepo();
+  try {
+    runIn(dir, "init");
+    runIn(dir, "baseline", "left.md", "right.md");
+    // With baseline: score=0.0
+    const withBaseline = runIn(dir, "left.md", "right.md", "--stats", "--fail-on", "none");
+    assert.match(withBaseline, /score=0\.0/);
+    // --no-baseline: drift is visible again
+    const withoutBaseline = runIn(
+      dir,
+      "left.md",
+      "right.md",
+      "--stats",
+      "--no-baseline",
+      "--fail-on",
+      "none",
+    );
+    assert.match(withoutBaseline, /commitment-shifts=2/);
+  } finally {
+    rmSync(dir, { force: true, recursive: true });
+  }
 });

@@ -6,10 +6,20 @@ SameDiff Lens is a dual-surface semantic diff tool: a browser UI (React+Vite, de
 
 The core analysis engine in `src/analysis/` is shared between both surfaces. It performs deterministic, heuristic-based semantic diffing with no LLM or embedding dependencies.
 
+**Identity shift (v0.4):** the CLI is no longer framed as "a diff tool with many flags" — it's **a primitive for a repo to declare and enforce its semantic-drift contract**. That contract lives in `.samediff.json` and is consumed identically by CI and local developers.
+
 **Working surfaces:**
 - CLI: `./samediff left.md right.md` (auto-builds if stale)
 - Browser: `npm run dev` or live at GitHub Pages
-- Tests: 14 engine tests + 29 CLI integration tests, all passing
+- Tests: 14 engine tests + 77 CLI integration tests, all passing
+
+**Repo-level configuration:**
+- `.samediff.json` (walked up from cwd; stops at `$HOME` / filesystem root) declares a repo's drift contract
+- Named policies: built-in (`adoption`, `strict`, `docs-only`, `advisory`) + user-defined
+- `default_policy` auto-applies with no flags
+- Precedence: explicit CLI flags > selected policy > top-level config > built-in defaults
+- `--config <path>` / `--no-config` / `--policy <name>` / `--no-policy` escape hatches
+- Subcommands: `init`, `policies`, `baseline`, `check`
 
 **CLI capabilities:**
 - Terminal output with colored drift cards and visual score bar
@@ -43,9 +53,209 @@ The core analysis engine in `src/analysis/` is shared between both surfaces. It 
 **Example spectrum (examples/):**
 01-modal-shift → 02-todo-drift → 03-api-contract → 04-prompt-policy → 05-hydra-doc-drift
 
-**Test counts:** 14 engine tests + 55 CLI integration tests, all passing
+**Test counts:** 14 engine tests + 77 CLI integration tests, all passing
 
 ## Devlog
+
+### 2026-04-16 (session 5) — Repo-level policy/config canonization
+
+The prior session made the CLI CI-ready; this one makes it *repo-native*.
+Before: every CI job hand-crafted a string of flags and hoped they stayed
+consistent. After: the contract lives in one checked-in file, and a
+developer's local run matches CI by construction. Version 0.4.0.
+
+**The product-shape shift:**
+SameDiff Lens stops being "a CLI with flags" and becomes "a primitive a
+repo uses to declare what semantic drift means and enforce it over time."
+That reframing is load-bearing. It changes the README, the subcommand
+surface, the way CI snippets look in the docs, and the onboarding flow.
+
+**What we built:**
+- `.samediff.json` config file with walk-up discovery (stops at `$HOME`
+  or filesystem root; capped at 10 levels)
+- Built-in policies always available even without a config file:
+  - `adoption` — baseline-aware; fails on NEW drift ≥ score:4 in commits
+    / contradictions
+  - `strict` — fails on any commit shift or contradiction
+  - `docs-only` — commits + contradictions + concepts + todos; score:5
+  - `advisory` — `fail_on: null`; reports only
+- `default_policy` field in config → auto-applies without any CLI flag
+- User-defined policies override same-named built-ins (`samediff policies`
+  shows `(override)` next to these)
+- New flags: `--config <path>`, `--no-config`, `--policy <name>`,
+  `--no-policy`, `--no-baseline`, `--fail-on none`
+- New subcommands: `samediff init`, `samediff policies`, `samediff baseline`,
+  `samediff check` (explicit alias for bareword run)
+- `--json` output gains an additive `policy` block when a policy shaped
+  the run (name, source, config path)
+- Gentle fallback when a policy-configured baseline path doesn't exist:
+  prints a one-line note, continues without the baseline, doesn't crash.
+  That preserves the `init → baseline → run` onboarding loop even if a
+  user runs the middle step out of order.
+- Provenance line on stderr (`SameDiff: config=..., policy=adoption
+  (default)`) so users can always see which layers shaped the run
+
+**Config shape:**
+```json
+{
+  "baseline": ".samediff-baseline.json",
+  "include": ["commitment-shifts", "contradictions"],
+  "exclude": [],
+  "fail_on": "score:5",
+  "github": false,
+  "compact": false,
+  "stats": false,
+  "default_policy": "adoption",
+  "policies": {
+    "adoption": { ... },
+    "strict":   { ... },
+    "advisory": { "fail_on": null }
+  }
+}
+```
+
+`$schema` at the top level is allowed and ignored, matching JSON-schema
+conventions.
+
+**Precedence (high to low):**
+1. Explicit CLI flags
+2. Selected policy block (via `--policy` or `default_policy`)
+3. Top-level config block
+4. Built-in defaults
+
+Array fields (`include`, `exclude`) replace rather than union across layers.
+Union would be confusing — "I said only concepts" shouldn't silently also
+include whatever the policy had. Rationale encoded in resolveOptions.ts.
+
+`fail_on: null`, `"none"`, `"never"`, `"off"` are all normalized to
+"never fail." That covers what people actually type.
+
+**Key decisions & why:**
+
+- **Config file, not `.samediffrc` or `package.json#samediff`.** Keeping
+  it `.samediff.json` makes it a first-class JSON artifact with its own
+  `$schema` hook. Linters and editors can type-check it. `package.json`
+  integration would conflate tool config with package metadata, and we
+  want this file to feel as checked-in as `.eslintrc`.
+
+- **Walk-up discovery, not just cwd.** Developers run the tool from
+  subdirectories all the time. Stop at `$HOME` so we never cross into
+  another repo or the user's dotfiles.
+
+- **Built-in policies stay in code, not on disk.** Two reasons: (a) users
+  get sensible defaults before they ever touch a config file, so
+  `samediff --policy strict` works anywhere, and (b) the starter config
+  from `samediff init` can be short and aspirational instead of dumping
+  100 lines of defaults onto the repo.
+
+- **No DSL.** I intentionally didn't build a rule engine. The config is a
+  thin JSON veneer over the existing flag surface. If we later need
+  per-file rules or regex matches, we can grow into it — starting with
+  a richer config now would add complexity before we've seen real
+  requirements.
+
+- **Filters still operate on AnalysisResult.** The invariant from last
+  session holds: every renderer sees the same filtered view, score and
+  summary are recomputed, so `--policy adoption` + baseline yields
+  "fail only on NEW drift ≥ score:4" without any special code paths.
+
+- **`check` as an optional alias, not a required subcommand.** Bareword
+  `samediff a.md b.md` still works. Forcing a subcommand would break
+  everyone's muscle memory and every shell history. `check` is there
+  for users who prefer explicit forms or for scripting clarity.
+
+- **`init` writes an aspirational starter, not a lowest-common-denominator
+  one.** It defaults to `adoption` because that's the mode that actually
+  works for most repos on day one. "Strict" is right there as a policy
+  for when they're ready.
+
+- **Stderr provenance line is always on when a policy/config shaped the
+  run.** Silent behavior is great when it matches expectations; it's
+  actively harmful when it doesn't. One line on stderr costs nothing and
+  lets developers see "oh, that's which policy fired" at a glance.
+
+- **`baseline` subcommand takes `<left> <right>` instead of reading from
+  config.** We thought about inferring from `--git` or config, but then
+  the first-use flow becomes magic. Explicit paths are unambiguous and
+  compose with `--git` cleanly (`samediff baseline a.md b.md -o ...`).
+
+**Why policy/config before SARIF, line anchors, or directory mode:**
+
+Those three are all valuable follow-ons, but they're **surface extensions**
+— they add more ways to render or scope findings. The repo-as-policy-owner
+reframing is a **product spine change**. Every adjacent feature gets more
+valuable once a repo has a canonical contract:
+
+- SARIF renders the output of a policy, not of an ad-hoc CLI run
+- Line anchors make the findings inside a policy-shaped run more useful
+- Directory mode is "apply the policy across N files"
+
+So getting the spine right unlocks the follow-ons. Building SARIF first
+would have produced a SARIF emitter tied to hand-crafted flag strings.
+That's technical debt the moment a config file exists.
+
+**JSON output additions (backwards-compatible):**
+```jsonc
+{
+  // ... existing fields ...
+  "filters": {
+    "only": [...],
+    "exclude": [...],
+    "baseline": { "path": "...", "suppressed": 11 }
+  },
+  "policy": {
+    "config": "/path/to/.samediff.json",
+    "name": "adoption",
+    "source": "default"  // or "cli"
+  }
+}
+```
+
+Both blocks are optional. Schema version stays at `"1"` — the contract is
+additive.
+
+**Tests added (22 new, 77 total CLI):**
+- `policies` subcommand lists built-ins with no config
+- `init` writes starter config; refuses to overwrite without `--force`
+- `--policy strict` fails on commitment shifts; `--policy advisory` never fails
+- Unknown policy / unknown category / invalid JSON / missing default_policy
+  all exit 2 with clear messages
+- Full adoption flow: `init → baseline → run` yields score 0.0
+- Adoption policy without baseline: helpful note, still runs
+- Precedence: CLI `--fail-on` / `--only` / `--no-baseline` override policy
+- `--no-config` and `--no-policy` escape hatches
+- Explicit `--config <path>` uses custom file
+- Config can redefine a built-in policy by same name
+- `policy` block appears in `--json` output
+- `baseline` subcommand writes valid JSON, honors `-o`
+- `check` subcommand is byte-identical to bareword invocation
+
+**Paths worth following next:**
+
+1. **Line/source anchoring** — the engine doesn't yet track where a finding
+   originated. Adding a `location` field (`{ line, column, range }`) to
+   findings would light up the `--github` annotations (currently pinned
+   to file top) and enable proper inline PR review. This is the biggest
+   UX unlock.
+
+2. **SARIF 2.1.0 output** — now that the result model + policy story is
+   settled, SARIF becomes a mechanical renderer. Plugs directly into
+   GitHub code scanning and VS Code problems panel.
+
+3. **Directory / glob mode** — `samediff --dir docs/` applies the current
+   policy across N files, aggregates findings into one report. Config can
+   declare `targets: ["docs/**/*.md"]`.
+
+4. **PR-comment bot** — consume the JSON output, post a single collapsible
+   PR comment with the findings. Tiny GitHub Action on top of `--json`
+   + `--policy`.
+
+5. **`samediff baseline --update`** — detect when the baseline is older
+   than the files it covers and prompt to regenerate.
+
+6. **Config schema publishing** — the `$schema` URL in the starter config
+   is a placeholder. Host a real JSON Schema so editors get completion
+   and validation on `.samediff.json`.
 
 ### 2026-04-16 (session 4) — CI-native developer surface
 
