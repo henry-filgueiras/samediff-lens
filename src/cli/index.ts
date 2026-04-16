@@ -8,6 +8,7 @@ import { formatHtmlReport } from "./formatHtml";
 import { formatJsonOutput } from "./formatJson";
 import { formatCompactOutput } from "./formatCompact";
 import { formatGithubAnnotations } from "./formatGithub";
+import { formatSarifOutput } from "./formatSarif";
 import { formatAnalysisReport } from "../lib/report";
 import { computeDriftScore } from "./scoring";
 import { buildDiffResult } from "./resultModel";
@@ -63,7 +64,7 @@ Config & policy:
 
 Output formats:
   (default)             Colored terminal summary with drift score bar
-  --md | --html | --json | --compact | --github | --score | --stats
+  --md | --html | --json | --sarif | --compact | --github | --score | --stats
   -o, --out <file>      Write output to file instead of stdout
 
 Focus / noise control (override policy/config if passed):
@@ -176,6 +177,7 @@ function main() {
   const mdOutput = flags.has("--md");
   const htmlOutput = flags.has("--html");
   const jsonOutput = flags.has("--json");
+  const sarifOutput = flags.has("--sarif");
   const compactFlag = flags.has("--compact");
   const githubFlag = flags.has("--github");
   const statsFlag = flags.has("--stats");
@@ -275,7 +277,8 @@ function main() {
   }
 
   // Format defaults from policy/config, unless a CLI format flag was passed
-  const anyCliFormat = mdOutput || htmlOutput || jsonOutput || compactFlag || githubFlag || statsFlag || scoreOnly;
+  const anyCliFormat =
+    mdOutput || htmlOutput || jsonOutput || sarifOutput || compactFlag || githubFlag || statsFlag || scoreOnly;
   const githubOutput = githubFlag || (!anyCliFormat && effective.defaultGithub);
   const compactOutput = compactFlag || (!anyCliFormat && effective.defaultCompact);
   const statsOutput = statsFlag || (!anyCliFormat && effective.defaultStats);
@@ -285,6 +288,7 @@ function main() {
     mdOutput,
     htmlOutput,
     jsonOutput,
+    sarifOutput,
     compactOutput,
     githubOutput,
     statsOutput,
@@ -292,7 +296,7 @@ function main() {
   ].filter(Boolean).length;
   if (chosenFormats > 1) {
     console.error(
-      "Error: pass at most one output format (--md, --html, --json, --compact, --github, --stats, --score).",
+      "Error: pass at most one output format (--md, --html, --json, --sarif, --compact, --github, --stats, --score).",
     );
     process.exit(2);
   }
@@ -380,6 +384,18 @@ function main() {
         };
       }
       emit(formatJsonOutput(diffResult));
+      return finish(result, score);
+    }
+
+    if (sarifOutput) {
+      const diffResult = buildDiffResult(result, {
+        labelA: input.labelA,
+        labelB: input.labelB,
+        pathA: input.fileAPath || null,
+        pathB: input.fileBPath || null,
+        gitRef: input.gitSpec ? undefined : null,
+      });
+      emit(formatSarifOutput(diffResult, { baseDir: cwd }));
       return finish(result, score);
     }
 

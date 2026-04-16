@@ -994,6 +994,172 @@ test("check subcommand is an alias for bareword invocation", () => {
   assert.equal(bare, explicit);
 });
 
+// ─── SARIF output ────────────────────────────────────────────────────
+
+test("--sarif emits a valid SARIF 2.1.0 document", () => {
+  const output = run(simpleLeft, simpleRight, "--sarif");
+  const sarif = JSON.parse(output);
+  assert.equal(sarif.version, "2.1.0");
+  assert.match(sarif.$schema, /sarif-schema-2\.1\.0\.json$/);
+  assert.ok(Array.isArray(sarif.runs));
+  assert.equal(sarif.runs.length, 1);
+  const run0 = sarif.runs[0];
+  assert.equal(run0.tool.driver.name, "samediff-lens");
+  assert.ok(run0.tool.driver.version);
+  assert.match(run0.tool.driver.informationUri, /^https:\/\//);
+  assert.ok(Array.isArray(run0.tool.driver.rules));
+  assert.equal(run0.invocations[0].executionSuccessful, true);
+});
+
+test("--sarif exposes the full stable rule catalog", () => {
+  const output = run(simpleLeft, simpleRight, "--sarif");
+  const sarif = JSON.parse(output);
+  const rules = sarif.runs[0].tool.driver.rules;
+  const ids = rules.map((r) => r.id).sort();
+  assert.deepEqual(ids, [
+    "action-item-added",
+    "action-item-removed",
+    "commitment-shift",
+    "concept-added",
+    "concept-removed",
+    "concept-renamed",
+    "contradiction",
+  ]);
+  for (const rule of rules) {
+    assert.equal(typeof rule.id, "string");
+    assert.equal(typeof rule.name, "string");
+    assert.equal(typeof rule.shortDescription.text, "string");
+    assert.equal(typeof rule.fullDescription.text, "string");
+    assert.ok(["note", "warning", "error"].includes(rule.defaultConfiguration.level));
+  }
+});
+
+test("--sarif rule levels: contradictions are error, commitment shifts warning", () => {
+  const output = run(simpleLeft, simpleRight, "--sarif");
+  const sarif = JSON.parse(output);
+  const byId = Object.fromEntries(sarif.runs[0].tool.driver.rules.map((r) => [r.id, r]));
+  assert.equal(byId["contradiction"].defaultConfiguration.level, "error");
+  assert.equal(byId["commitment-shift"].defaultConfiguration.level, "warning");
+  for (const id of ["concept-added", "concept-removed", "concept-renamed", "action-item-added", "action-item-removed"]) {
+    assert.equal(byId[id].defaultConfiguration.level, "note");
+  }
+});
+
+test("--sarif anchored commitment shift has dual locations (after primary + before related)", () => {
+  const output = run(simpleLeft, simpleRight, "--sarif");
+  const sarif = JSON.parse(output);
+  const results = sarif.runs[0].results;
+  const commits = results.filter((r) => r.ruleId === "commitment-shift");
+  assert.ok(commits.length > 0);
+  for (const r of commits) {
+    assert.ok(r.locations && r.locations.length === 1, "primary location");
+    const primary = r.locations[0].physicalLocation;
+    assert.match(primary.artifactLocation.uri, /right\.md$/);
+    assert.ok(primary.region.startLine >= 1);
+    assert.ok(r.relatedLocations && r.relatedLocations.length === 1);
+    const related = r.relatedLocations[0].physicalLocation;
+    assert.match(related.artifactLocation.uri, /left\.md$/);
+  }
+});
+
+test("--sarif removed-concept uses before file as primary (never fakes after location)", () => {
+  const output = run(beforeFile, afterFile, "--sarif");
+  const sarif = JSON.parse(output);
+  const removed = sarif.runs[0].results.filter((r) => r.ruleId === "concept-removed");
+  assert.ok(removed.length > 0);
+  for (const r of removed) {
+    if (!r.locations) continue; // unanchored ones are fine
+    const uri = r.locations[0].physicalLocation.artifactLocation.uri;
+    assert.match(uri, /left\.md$/, `removed concept should point at the BEFORE file, got ${uri}`);
+    // Must not carry an after-file relatedLocation
+    if (r.relatedLocations) {
+      for (const rl of r.relatedLocations) {
+        assert.ok(
+          !/right\.md$/.test(rl.physicalLocation.artifactLocation.uri),
+          "removed concept should not pretend it exists on the after side",
+        );
+      }
+    }
+  }
+});
+
+test("--sarif added-concept primary lives on the after file", () => {
+  const output = run(beforeFile, afterFile, "--sarif");
+  const sarif = JSON.parse(output);
+  const added = sarif.runs[0].results.filter((r) => r.ruleId === "concept-added");
+  assert.ok(added.length > 0);
+  for (const r of added) {
+    if (!r.locations) continue;
+    const uri = r.locations[0].physicalLocation.artifactLocation.uri;
+    assert.match(uri, /right\.md$/);
+  }
+});
+
+test("--sarif unanchored finding omits region/locations rather than inventing them", () => {
+  // Identical files → no findings at all; still a valid SARIF document.
+  const output = run(simpleLeft, simpleLeft, "--sarif");
+  const sarif = JSON.parse(output);
+  assert.equal(sarif.version, "2.1.0");
+  assert.equal(sarif.runs[0].results.length, 0);
+});
+
+test("--sarif URIs are relative to cwd when possible", () => {
+  const output = run(simpleLeft, simpleRight, "--sarif");
+  const sarif = JSON.parse(output);
+  // We run from repoRoot, so URIs should be under examples/01-modal-shift/
+  for (const r of sarif.runs[0].results) {
+    if (!r.locations) continue;
+    const uri = r.locations[0].physicalLocation.artifactLocation.uri;
+    assert.ok(!uri.startsWith("/"), `uri should be relative, got absolute: ${uri}`);
+    assert.match(uri, /^examples\/01-modal-shift\/(left|right)\.md$/);
+  }
+});
+
+test("--sarif anchorQuality appears in result properties when provenance is present", () => {
+  const output = run(simpleLeft, simpleRight, "--sarif");
+  const sarif = JSON.parse(output);
+  const anchored = sarif.runs[0].results.filter((r) => r.locations);
+  assert.ok(anchored.length > 0);
+  for (const r of anchored) {
+    assert.ok(r.properties && typeof r.properties.anchorQuality === "string");
+    assert.ok(["exact", "approximate", "derived"].includes(r.properties.anchorQuality));
+  }
+});
+
+test("--sarif run.properties carries drift score + counts", () => {
+  const output = run(simpleLeft, simpleRight, "--sarif");
+  const sarif = JSON.parse(output);
+  const props = sarif.runs[0].properties;
+  assert.ok(props);
+  assert.equal(typeof props.driftScore, "number");
+  assert.ok(["low", "moderate", "high", "critical"].includes(props.driftLabel));
+  assert.equal(typeof props.exitCode, "number");
+  assert.ok(props.counts && typeof props.counts.total === "number");
+});
+
+test("--sarif + -o writes to file", () => {
+  const tmpDir = mkdtempSync(resolve(tmpdir(), "samediff-sarif-"));
+  const outPath = resolve(tmpDir, "out.sarif");
+  try {
+    run(simpleLeft, simpleRight, "--sarif", "-o", outPath);
+    const text = readFileSync(outPath, "utf-8");
+    const sarif = JSON.parse(text);
+    assert.equal(sarif.version, "2.1.0");
+  } finally {
+    rmSync(tmpDir, { force: true, recursive: true });
+  }
+});
+
+test("--sarif and --json together is a usage error (mutex)", () => {
+  try {
+    run(simpleLeft, simpleRight, "--sarif", "--json");
+    assert.fail("Expected exit 2");
+  } catch (err) {
+    assert.equal(err.status, 2);
+    assert.match(err.stderr ?? err.message, /at most one output format/);
+  }
+});
+
 // ─── Provenance / source anchoring (output surfaces) ────────────────
 
 test("--json findings carry a structured provenance block", () => {

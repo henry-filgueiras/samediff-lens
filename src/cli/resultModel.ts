@@ -150,7 +150,7 @@ export type BuildResultOptions = {
   toolVersion?: string;
 };
 
-const TOOL_VERSION = "0.5.0";
+const TOOL_VERSION = "0.6.0";
 
 export function buildDiffResult(
   analysis: AnalysisResult,

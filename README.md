@@ -242,6 +242,37 @@ ADDED	required for all production	@ after:3
 
 Quality labels are honest: `"exact"` when the evidence was found verbatim, `"approximate"` when located only after whitespace/case normalization, `"derived"` when the anchor was inferred from higher-level matching. Findings that can't be located carry `provenance: null` rather than inventing a line number.
 
+### SARIF 2.1.0 export
+
+For code scanning tools and static-analysis pipelines:
+
+```bash
+samediff --git origin/main -- docs/spec.md --sarif -o samediff.sarif
+```
+
+The SARIF output is a mechanical renderer on top of the same DiffResult that `--json` emits. Provenance drives `physicalLocation.region`; the tool never invents a region it doesn't have.
+
+Mapping at a glance:
+
+| Finding | SARIF `ruleId` | Level | Primary location | Related location |
+| --- | --- | --- | --- | --- |
+| commitment shift | `commitment-shift` | warning | after | before |
+| contradiction | `contradiction` | error | after | before |
+| concept rename | `concept-renamed` | note | after | before |
+| concept added | `concept-added` | note | after | — |
+| concept removed | `concept-removed` | note | **before** | — |
+| action item added | `action-item-added` | note | after | — |
+| action item removed | `action-item-removed` | note | **before** | — |
+
+Removed-on-before findings (removed concepts, removed action items) use the before file as their primary `artifactLocation` rather than pretending to exist on the after side. Unanchored findings still appear as SARIF results but omit physical locations — the shape is "useful message with no region" instead of "fake region."
+
+Useful properties:
+- `runs[0].properties.driftScore` / `driftLabel` / `counts` — same score/counts as `--json`
+- `result.properties.anchorQuality` — `"exact"` / `"approximate"` / `"derived"` when provenance exists
+- `result.properties.confidence` — on concept-rename results only
+
+Artifact URIs are relative to the current working directory when paths fall under it (good for GitHub code scanning upload), or basename otherwise. `--sarif` composes with `-o`, `--policy`, `--baseline`, `--only/--exclude`, and `--fail-on` like any other format.
+
 ## Browser UI
 
 - [Live demo](https://henry-filgueiras.github.io/samediff-lens/)

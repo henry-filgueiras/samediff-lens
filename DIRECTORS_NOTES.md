@@ -10,10 +10,12 @@ The core analysis engine in `src/analysis/` is shared between both surfaces. It 
 
 **Inspectability (v0.5):** every finding now carries structured **provenance** — which side, which line range, optional snippet, honest quality label. Findings are no longer locationless oracles; the tool can point back into the artifacts.
 
+**Ecosystem portability (v0.6):** SARIF 2.1.0 export. Findings can now be emitted in the standard static-analysis interchange format, driven directly by DiffResult + provenance. GitHub code scanning and other SARIF consumers work without any bespoke glue.
+
 **Working surfaces:**
 - CLI: `./samediff left.md right.md` (auto-builds if stale)
 - Browser: `npm run dev` or live at GitHub Pages
-- Tests: 20 engine tests + 88 CLI integration tests, all passing
+- Tests: 20 engine tests + 100 CLI integration tests, all passing
 
 **Repo-level configuration:**
 - `.samediff.json` (walked up from cwd; stops at `$HOME` / filesystem root) declares a repo's drift contract
@@ -55,9 +57,172 @@ The core analysis engine in `src/analysis/` is shared between both surfaces. It 
 **Example spectrum (examples/):**
 01-modal-shift → 02-todo-drift → 03-api-contract → 04-prompt-policy → 05-hydra-doc-drift
 
-**Test counts:** 20 engine tests + 88 CLI integration tests, all passing
+**Test counts:** 20 engine tests + 100 CLI integration tests, all passing
 
 ## Devlog
+
+### 2026-04-16 (session 7) — SARIF 2.1.0 export
+
+SARIF was kept deliberately deferred until provenance existed, because
+without source anchoring every SARIF result would either be locationless
+or pinned to a fake region. Now that provenance is a first-class spine
+feature, SARIF is what the last session promised it would be: a
+mechanical renderer on top of DiffResult, not a second semantic universe.
+Version 0.6.0.
+
+**What we built:**
+- `src/cli/formatSarif.ts` — a dedicated renderer consuming DiffResult.
+  No re-analysis, no duplicate finding construction. DiffResult is the
+  single source of truth; SARIF is a projection of it.
+- `--sarif` CLI flag — first-class output format alongside `--json`,
+  `--md`, `--html`, `--compact`, `--github`, `--stats`, `--score`.
+  Composes with `-o`, `--policy`, `--baseline`, `--only`/`--exclude`,
+  and `--fail-on`.
+- Stable rule catalog with seven ruleIds, one per finding category:
+  `commitment-shift`, `contradiction`, `concept-renamed`,
+  `concept-added`, `concept-removed`, `action-item-added`,
+  `action-item-removed`.
+- Each rule has a default severity `level`:
+    * `contradiction` → **error** (the dangerous signal)
+    * `commitment-shift` → **warning** (implied-contract change)
+    * everything else → **note** (informational drift)
+  Consumers can override these per SARIF convention without touching
+  our code.
+- Artifact URIs are repo-relative when paths fall under `cwd` (ideal
+  for GitHub code scanning upload), else `basename()`. Git-ref labels
+  like `HEAD~1:spec.md` pass through unchanged.
+- `run.properties` carries `driftScore`, `driftLabel`, `exitCode`,
+  and `counts` — SameDiff-specific metadata that SARIF readers will
+  ignore but that our own tooling and CI can consume.
+- `result.properties.anchorQuality` carries `"exact"` / `"approximate"`
+  / `"derived"` so consumers can tell how much to trust a region.
+
+**Location mapping (the load-bearing decision):**
+
+| Finding category | Primary location | Related location |
+| --- | --- | --- |
+| commitment-shift | after | before |
+| contradiction | after | before |
+| concept-renamed | after | before |
+| concept-added | after | — |
+| concept-removed | **before** | — |
+| action-item-added | after | — |
+| action-item-removed | **before** | — |
+
+Before-only findings (removed concepts, removed action items) use
+the *before* file as the primary `artifactLocation`. We intentionally
+don't pin them to a line in the after file, which would be a lie —
+the whole point of a "removed" finding is that it's not there anymore.
+
+Unanchored findings still appear as SARIF results, but with no
+`locations` array at all. Message + ruleId + level survive; the
+region is omitted rather than invented. A SARIF viewer will show the
+result without file attribution, which is the correct representation
+of "we know this changed but we couldn't locate it."
+
+When both sides are anchored (commitment shifts, contradictions,
+dual-anchor renames), the primary location goes on the after side and
+the before side is attached as a `relatedLocations` entry with a
+descriptive message ("corresponding before location"). Single-sided
+anchoring — or cases where the primary-side anchor wasn't found but
+the other side was — does NOT emit a redundant relatedLocation; we
+just use the anchor we have and don't pretend we have two.
+
+**Key decisions & why:**
+
+- **Consume DiffResult, not AnalysisResult.** DiffResult is already
+  the canonical intermediate representation for the JSON contract.
+  SARIF is another projection of the same thing. This keeps future
+  schema changes propagating cleanly: evolve DiffResult once, every
+  renderer follows.
+
+- **One ruleId per category, stable across releases.** Not per
+  heuristic, not per trigger. Finer-grained rules would be noisier,
+  harder for consumers to configure (`rules.commitment-shift.level =
+  "error"` is a single line in a SARIF config), and harder to evolve
+  without breaking consumers. Trigger strings like "strengthens the
+  commitment" ride along in the `message.text` where they belong.
+
+- **No `ruleIndex` on results.** ruleId alone is sufficient for every
+  SARIF consumer I can find; ruleIndex adds a fragile coupling between
+  rule order and result fields for zero product benefit.
+
+- **Repo-relative URIs, not `file://` absolute.** Absolute paths break
+  GitHub code scanning upload (paths must match repo layout). Relative
+  paths under cwd work out of the box. When files are outside cwd we
+  fall back to `basename()` — honest and portable. Power users wanting
+  a different base URI can post-process; we left a `SarifOptions.baseDir`
+  hook on the renderer API for when we want to make this configurable.
+
+- **Default severity once, in rule definitions.** SARIF lets you set
+  `result.level` to override per-result. We don't, today. The rule-
+  default approach makes the whole catalog reconfigurable from the
+  outside (`tool.driver.rules[*].defaultConfiguration.level`) without
+  any per-result noise.
+
+- **`anchorQuality` in `result.properties`, not `result.rank` or
+  anything schema-defined.** SARIF's rank field means "priority" not
+  "confidence"; conflating the two would confuse consumers. `properties`
+  is the SARIF-sanctioned extension point.
+
+- **No SARIF schema validator in tests.** Pulling in `@sarif/sarif-nodejs`
+  or similar just for tests would be heavy. Instead we assert shape
+  specifics (version, required fields, rule catalog, location structure,
+  level mapping). Matches the project's test philosophy: targeted and
+  honest beats "we called a validator."
+
+- **No auto-upload to code scanning.** The mission asked for shape
+  compatibility, not a hosted integration. `--sarif -o foo.sarif` +
+  a user's GitHub Action (3-line `github/codeql-action/upload-sarif@v3`
+  snippet) is the right division of labor; we produce the file, they
+  ship it.
+
+**What SARIF preserves vs approximates vs omits:**
+
+| Layer | Preserves exactly | Approximates | Omits |
+| --- | --- | --- | --- |
+| Tool metadata | name, version, informationUri | — | — |
+| Rule catalog | id, name, short/full descriptions, default level | — | per-rule help beyond one URI |
+| Result messages | full DiffResult message + triggers | long clauses truncated to 160 chars | markdown formatting (we emit plain `text`) |
+| Locations | line/column from provenance when quality=exact | fuzzy-match line range when quality=approximate | locations entirely when provenance=null |
+| Severity | per-category level | — | per-finding severity deltas |
+| Evidence context | snippet (≤120 chars) | — | full before/after spans (stay in DiffResult JSON) |
+| Score / counts | under `run.properties` | — | not mapped to SARIF's `rank` / `baselineState` (those mean different things) |
+
+**Tests added (12 new, 100 total CLI):**
+- Valid SARIF 2.1.0 shape + schema URI
+- Full rule catalog present with correct IDs
+- Rule default levels match the documented mapping
+- Dual-anchor commitment shift: primary on right, related on left
+- Removed concept: primary on **before** file; no fake after-file coords
+- Added concept: primary on after file
+- Unanchored case (identical files) → valid SARIF with empty results
+- URIs are repo-relative (not absolute, not just basename)
+- `anchorQuality` surfaces in `result.properties`
+- `run.properties` carries drift score + counts
+- `--sarif -o <file>` writes valid SARIF to disk
+- `--sarif --json` → usage error (exit 2)
+
+**Paths worth following next:**
+
+1. **GitHub Action snippet** in docs/ showing how to upload
+   `samediff.sarif` via `github/codeql-action/upload-sarif`. Tiny but
+   high-leverage for users trying SARIF for the first time.
+
+2. **`--sarif --append <file>`** to accumulate SARIF across multiple
+   runs (multi-file directory mode will want this).
+
+3. **`originalUriBaseIds`** with `%SRCROOT%` once directory mode lands —
+   it's the canonical GitHub code scanning pattern for paths relative
+   to repo root. Harmless to skip today since we already emit cwd-relative.
+
+4. **Markdown messages** on SARIF results. We already populate `text`;
+   adding a `markdown` variant would light up rich formatting in
+   SARIF viewers that support it.
+
+5. **Per-finding severity override** once the engine grows a sharper
+   severity signal (e.g. "contradiction with high anchor overlap" vs
+   "weak narrowing signal"). Today the score is per-run, not per-finding.
 
 ### 2026-04-16 (session 6) — Finding provenance / source anchoring
 
