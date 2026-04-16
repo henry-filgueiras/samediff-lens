@@ -6,8 +6,8 @@ import { test } from "node:test";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const cli = resolve(repoRoot, "dist-cli/cli/index.js");
-const beforeFile = resolve(repoRoot, "examples/hydra-doc-drift/before.md");
-const afterFile = resolve(repoRoot, "examples/hydra-doc-drift/after.md");
+const beforeFile = resolve(repoRoot, "examples/05-hydra-doc-drift/left.md");
+const afterFile = resolve(repoRoot, "examples/05-hydra-doc-drift/right.md");
 
 function run(...args) {
   return execFileSync("node", [cli, ...args], {
@@ -64,7 +64,7 @@ test("--md flag outputs markdown report", () => {
 
 test("header includes file names", () => {
   const output = run(beforeFile, afterFile);
-  assert.match(output, /before\.md.*after\.md/);
+  assert.match(output, /left\.md.*right\.md/);
 });
 
 test("missing file produces error", () => {

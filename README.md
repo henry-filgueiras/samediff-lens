@@ -8,44 +8,12 @@ Feedback on false positives, false negatives, and confusing outputs is welcome v
 
 ```bash
 npm install && npm run build:cli
-npm run samediff -- examples/hydra-doc-drift/before.md examples/hydra-doc-drift/after.md
-```
-
-Output:
-
-```text
-Δ SameDiff Summary
-
-  before.md → after.md
-
-COMMITMENT SHIFTS
-  - Nodes should register on boot and may deregister on grace...
-  + Nodes must register on boot and must deregister on gracef...
-    strengthens the commitment
-  - The system should retry failed jobs
-  + The system retries only idempotent jobs, up to 3 times wi...
-    narrows scope
-
-TASK DRIFT
-  + TODO added: benchmark against GMP for large cluster sizes
-  - TODO removed: validate karatsuba threshold for batch sizes
-
-CONCEPT RENAME (heuristic)
-  nodes should register → nodes must register  [high]
-
-POSSIBLE CONTRADICTIONS
-  ! B narrows protocol with limiting language that may contradict A's broader claim.
-
-ADDED CONCEPTS
-  + crdt based convergence healing
-  + suspected down event via gossip
-
-REMOVED CONCEPTS
-  - karatsuba threshold for batch
-  - applied atomically at epoch boundaries
+npm run samediff -- examples/01-modal-shift/left.md examples/01-modal-shift/right.md
 ```
 
 Options: `--no-color` for plain text, `--md` for a full Markdown report, `--help` for usage.
+
+There are five example pairs in `examples/`, from simple to advanced — see [examples/README.md](examples/README.md).
 
 ## Browser UI
 
@@ -248,9 +216,11 @@ bin/
 docs/
   v0-contract.md
 examples/
-  hydra-doc-drift/      # example fixture for CLI demo
-    before.md
-    after.md
+  01-modal-shift/       # simple: may→must
+  02-todo-drift/        # simple: checklist changes
+  03-api-contract/      # medium: spec narrowing
+  04-prompt-policy/     # medium: behavioral contract
+  05-hydra-doc-drift/   # advanced: full architecture rewrite
 src/
   analysis/             # heuristic detection engine (shared)
   cli/                  # CLI-specific code
