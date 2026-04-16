@@ -130,11 +130,24 @@ const contradictionCount = files.reduce(
   0,
 );
 
+// Blocking subset: medium/high confidence, plus any contradictions whose
+// confidence we couldn't determine (treated conservatively as blocking so a
+// metadata gap never silently unblocks a real issue). Low-confidence
+// contradictions — typically narrowing heuristics that fire on additive
+// changes — are advisory: surfaced in the comment, ignored by the gate.
+const blockingContradictionCount = files.reduce((sum, f) => {
+  const items = f.findings?.contradictions ?? [];
+  return sum + items.filter((c) => c.confidence !== "low").length;
+}, 0);
+const advisoryContradictionCount = contradictionCount - blockingContradictionCount;
+
 const index = {
   base,
   files,
   sarifRelPath,
   contradictionCount,
+  blockingContradictionCount,
+  advisoryContradictionCount,
   toolVersion,
 };
 
@@ -143,9 +156,13 @@ writeFileSync(join(outDir, "index.json"), JSON.stringify(index, null, 2) + "\n",
 // Also print a short textual summary to stdout — handy in the workflow logs
 // and for $GITHUB_STEP_SUMMARY composition.
 const analyzed = files.filter((f) => f.status === "analyzed").length;
+const advisoryNote = advisoryContradictionCount > 0
+  ? ` (${advisoryContradictionCount} advisory)`
+  : "";
 process.stdout.write(
   `samediff-lens pr-review: ${analyzed} analyzed, ${files.length - analyzed} skipped, ` +
-    `${contradictionCount} contradiction(s), SARIF=${sarifRelPath ?? "none"}\n`,
+    `${blockingContradictionCount} blocking contradiction(s)${advisoryNote}, ` +
+    `SARIF=${sarifRelPath ?? "none"}\n`,
 );
 
 // Exit 0 — contradictions are gated by the workflow, not here. This keeps
