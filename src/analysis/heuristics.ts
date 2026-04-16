@@ -426,8 +426,35 @@ export function detectRenameIdeas(pairs: MatchedPair[]): RenamedIdea[] {
 export function detectPossibleContradictions(aUnits: Unit[], bUnits: Unit[]): ContradictionEvidence[] {
   const findings: ContradictionEvidence[] = [];
 
+  // Drift-invariance guard: if both sentences of a cross-product pair also
+  // exist verbatim on the opposite side, the "contradiction" is an artifact
+  // of intra-file structure (e.g. a title anchoring a prose negation, or a
+  // narrowing bullet-label elsewhere in the same doc) — not drift between
+  // versions. This lookup makes `samediff file.md file.md` return zero
+  // contradictions by construction.
+  const aRawSet = new Set(aUnits.map((u) => u.raw));
+  const bRawSet = new Set(bUnits.map((u) => u.raw));
+
   aUnits.forEach((a) => {
     bUnits.forEach((b) => {
+      if (aRawSet.has(b.raw) && bRawSet.has(a.raw)) return;
+
+      // Structural-unit guard: markdown headings, HTML-only lines, and
+      // very short label fragments don't make semantic claims. Pairing a
+      // title against a prose line that happens to share an anchor token
+      // is a classic false positive ("Negation around v0" between
+      // `# SameDiff Lens v0 Contract` and a later `v0 is not ...` clause).
+      // Require both sides of the pair to be claim-shaped.
+      if (!isClaimShaped(a) || !isClaimShaped(b)) return;
+
+      // Topical-overlap guard: a contradiction between two sentences
+      // requires them to be about the same topic, not merely to share a
+      // coincidental buzzword. Threshold is slightly lower than
+      // `matchUnits` (0.12) on purpose — legit negation/required/optional
+      // flips often live in short sentences that share exactly one
+      // anchor (jaccard ≈ 0.11), and we want to keep those.
+      if (jaccard(a.contentTokens, b.contentTokens) < 0.1) return;
+
       const sharedAnchors = intersection(a.contentTokens, b.contentTokens).filter(
         (token) => !ANCHOR_GENERIC_TERMS.has(token),
       );
@@ -527,6 +554,28 @@ export function buildSummary(parts: {
 
 function pickFocusedPhrase(source: string, importantTokens: string[]): string | null {
   return extractFocusedPhrases(source, importantTokens)[0]?.phrase ?? null;
+}
+
+/**
+ * True when a unit looks like an actual claim rather than structural
+ * scaffolding (titles, bullet labels, HTML markup).
+ *
+ * Structural units can carry shared anchor tokens that trick the
+ * contradiction heuristic into pairing, e.g., `# SameDiff Lens v0 Contract`
+ * with a later clause about "v0" — the title is just a topic pointer, not
+ * a proposition that can agree or disagree. We also exclude HTML-only
+ * lines (raw starts with `<`) and very short label fragments that lack a
+ * predicate shape (no commitment/action/directive signal and fewer than
+ * four content tokens).
+ */
+function isClaimShaped(unit: Unit): boolean {
+  const raw = unit.raw.trimStart();
+  if (raw.startsWith("#")) return false; // markdown heading
+  if (raw.startsWith("<")) return false; // HTML markup / structural tag
+  const hasPredicateSignal =
+    unit.isCommitmentLike || unit.isActionItem || unit.isDirectiveLike;
+  if (!hasPredicateSignal && unit.contentTokens.length < 4) return false;
+  return true;
 }
 
 function uniqueRenameIdeas(items: RenamedIdea[]): RenamedIdea[] {

@@ -160,6 +160,154 @@ test("identical text stays low-drift", () => {
   assert.match(result.summary, /did not find a strong semantic shift/i);
 });
 
+test("multi-section identity self-compare produces no contradictions", () => {
+  // Regression guard for the dogfood-discovered false-positive pattern:
+  // a title anchors a prose negation across the document, causing
+  // `detectPossibleContradictions` to fire on a single-file compare.
+  // Covers README / DIRECTORS_NOTES / docs-style files whose top-level
+  // headings share anchor tokens with negation-bearing prose lines.
+  const text = [
+    "# SameDiff Lens v0 Contract",
+    "",
+    "## Product goal",
+    "",
+    "SameDiff Lens is a local-first browser tool. The goal of v0 is not perfect understanding; it is to make change visible through small heuristics.",
+    "",
+    "## UX sketch",
+    "",
+    '- "local-only" and "heuristic / experimental" labels',
+  ].join("\n");
+
+  const result = analyzeTextPair(text, text);
+  assert.deepEqual(result.possibleContradictions, []);
+  assert.deepEqual(result.possibleContradictionsEvidence, []);
+});
+
+test("drift-invariance suppression keeps real contradictions", () => {
+  // Same structural scaffolding on both sides, but B flips a
+  // substantive claim. The flipped sentence doesn't appear in A, so
+  // the guard must NOT suppress the finding.
+  const before = [
+    "# API Contract",
+    "",
+    "## Tokens",
+    "",
+    "Tokens are required for every request.",
+  ].join("\n");
+  const after = [
+    "# API Contract",
+    "",
+    "## Tokens",
+    "",
+    "Tokens are optional for every request.",
+  ].join("\n");
+
+  const result = analyzeTextPair(before, after);
+  assert.ok(
+    result.possibleContradictionsEvidence.some((ev) =>
+      /required|optional/i.test(ev.summary),
+    ),
+    "expected the required↔optional contradiction to survive suppression",
+  );
+});
+
+test("markdown headings do not anchor contradictions against prose", () => {
+  // The original dogfood false positive: a title like "# SameDiff Lens v0
+  // Contract" shares the token "v0" with a later prose line "v0 is not
+  // perfect understanding", and the negation asymmetry made the heuristic
+  // fire. A heading is not a claim and must not participate.
+  const before = [
+    "# API Contract",
+    "",
+    "## Tokens",
+    "",
+    "The token system is available.",
+  ].join("\n");
+  const after = [
+    "# API Contract",
+    "",
+    "## Tokens",
+    "",
+    "The token system is not available today.",
+  ].join("\n");
+
+  const result = analyzeTextPair(before, after);
+  // The legit negation-flip on the prose pair should fire, but nothing
+  // anchored to the "# API Contract" heading should.
+  for (const ev of result.possibleContradictionsEvidence) {
+    assert.ok(
+      !ev.versionA.trimStart().startsWith("#") &&
+        !ev.versionB.trimStart().startsWith("#"),
+      `contradiction anchored to a heading: ${ev.summary}`,
+    );
+  }
+});
+
+test("HTML-only lines do not anchor contradictions", () => {
+  const before = [
+    '<img src="logo.svg" alt="SameDiff Lens">',
+    "",
+    "SameDiff Lens surfaces commitment shifts.",
+  ].join("\n");
+  const after = [
+    '<img src="logo.svg" alt="SameDiff Lens">',
+    "",
+    "SameDiff Lens does not surface commitment shifts.",
+  ].join("\n");
+
+  const result = analyzeTextPair(before, after);
+  for (const ev of result.possibleContradictionsEvidence) {
+    assert.ok(
+      !ev.versionA.trimStart().startsWith("<") &&
+        !ev.versionB.trimStart().startsWith("<"),
+      `contradiction anchored to HTML markup: ${ev.summary}`,
+    );
+  }
+});
+
+test("low-overlap pairs do not fire contradictions on coincidental buzzwords", () => {
+  // Two sentences that share a single topic word but are about completely
+  // different things. Pre-guard, a negation asymmetry on that shared word
+  // would trigger a false positive; the Jaccard-overlap guard suppresses.
+  const before =
+    "The local storage layer persists settings across sessions.";
+  const after = "Open a local bug report so the team can reproduce it.";
+
+  const result = analyzeTextPair(before, after);
+  // "local" is the only shared anchor; the rest of each sentence is
+  // disjoint. Jaccard(0.12) should filter this cross-pair.
+  assert.equal(
+    result.possibleContradictionsEvidence.filter(
+      (ev) => ev.anchors.length === 1 && ev.anchors[0] === "local",
+    ).length,
+    0,
+  );
+});
+
+test("drift-invariance suppression only fires when BOTH sides share the pair", () => {
+  // A has both "required" and "optional"; B only has "optional". The
+  // cross-product pair (A:"Tokens are required.", B:"Tokens are optional.")
+  // contains an A-sentence that is NOT in B, so the guard must NOT
+  // suppress — something meaningful was dropped.
+  const before = [
+    "# API Contract",
+    "",
+    "Tokens are required for every request.",
+    "Tokens are optional for background jobs.",
+  ].join("\n");
+  const after = [
+    "# API Contract",
+    "",
+    "Tokens are optional for background jobs.",
+  ].join("\n");
+
+  const result = analyzeTextPair(before, after);
+  assert.ok(
+    result.possibleContradictionsEvidence.length > 0,
+    "expected some contradiction evidence when one conflicting claim is removed",
+  );
+});
+
 test("empty versus empty returns a safe empty result", () => {
   const result = analyzeTextPair("", "");
 
