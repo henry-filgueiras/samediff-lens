@@ -314,3 +314,88 @@ test("gate.mjs exits 0 when no contradictions", () => {
     unlinkSync(indexPath);
   }
 });
+
+test("gate.mjs passes when contradictions are all low-confidence (advisory-only)", () => {
+  const script = resolve(repoRoot, "tools/pr-review/gate.mjs");
+  const indexPath = resolve(repoRoot, "tools/pr-review/__test_index_advisory.json");
+  writeFileSync(
+    indexPath,
+    JSON.stringify({
+      contradictionCount: 2,
+      blockingContradictionCount: 0,
+      advisoryContradictionCount: 2,
+      files: [],
+    }),
+  );
+  try {
+    const res = spawnSync("node", [script, "--in", indexPath], { encoding: "utf-8" });
+    assert.equal(res.status, 0);
+    assert.match(res.stderr, /2 low-confidence contradictions surfaced as advisory/);
+  } finally {
+    unlinkSync(indexPath);
+  }
+});
+
+test("gate.mjs blocks on blocking contradictions and mentions advisory count", () => {
+  const script = resolve(repoRoot, "tools/pr-review/gate.mjs");
+  const indexPath = resolve(repoRoot, "tools/pr-review/__test_index_mixed.json");
+  writeFileSync(
+    indexPath,
+    JSON.stringify({
+      contradictionCount: 3,
+      blockingContradictionCount: 1,
+      advisoryContradictionCount: 2,
+      files: [],
+    }),
+  );
+  try {
+    const res = spawnSync("node", [script, "--in", indexPath], { encoding: "utf-8" });
+    assert.equal(res.status, 1);
+    assert.match(res.stderr, /blocking — 1 contradiction/);
+    assert.match(res.stderr, /2 additional low-confidence contradictions reported as advisory/);
+  } finally {
+    unlinkSync(indexPath);
+  }
+});
+
+test("comment renders advisory contradictions in a separate non-blocking section", () => {
+  const idx = sampleIndex();
+  idx.files[0].counts.contradictions = 2;
+  idx.files[0].findings.contradictions = [
+    {
+      summary: "Tokens required vs. optional",
+      confidence: "high",
+      anchor: "after:12",
+      anchored: true,
+    },
+    {
+      summary: "B narrows retry with limiting language",
+      confidence: "low",
+      anchor: "after:88",
+      anchored: true,
+    },
+  ];
+  const body = renderComment(idx);
+  assert.match(body, /Contradictions \(blocking\)/);
+  assert.match(body, /Advisory contradictions \(non-blocking\)/);
+  assert.match(body, /Tokens required vs\. optional.*_\[high\]_/);
+  assert.match(body, /B narrows retry.*_\[low\]_/);
+  assert.match(body, /Status: \*\*Blocked\*\* — 1 contradiction.*\+1 advisory/);
+});
+
+test("comment status is Advisory when only low-confidence contradictions fire", () => {
+  const idx = sampleIndex();
+  idx.files[0].counts.contradictions = 1;
+  idx.files[0].findings.contradictions = [
+    {
+      summary: "B narrows retry with limiting language",
+      confidence: "low",
+      anchor: "after:88",
+      anchored: true,
+    },
+  ];
+  const body = renderComment(idx);
+  assert.match(body, /Status: \*\*Advisory\*\* — 1 low-confidence contradiction surfaced/);
+  assert.match(body, /Advisory contradictions \(non-blocking\)/);
+  assert.doesNotMatch(body, /Contradictions \(blocking\)/);
+});

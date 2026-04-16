@@ -81,7 +81,7 @@ Category cards:
 
 Version A:
 
-> The system should retry failed jobs.
+> The system must retry failed jobs.
 
 Version B:
 

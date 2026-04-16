@@ -15,23 +15,25 @@ name: SameDiff Lens PR review
 #         comment upsert and SARIF upload steps will skip gracefully on
 #         forks rather than fail the job. This is intentional — we do not
 #         opt into the extra blast radius of `pull_request_target`.
-#   - We run `npm ci` and `npm run build:cli` on the PR's tree. That is
-#     the same level of trust as any typical CI-on-PR workflow.
+#   - When the PR actually changed allowlisted files, we run `npm ci`
+#     and `npm run build:cli` on the PR's tree. That is the same level
+#     of trust as any typical CI-on-PR workflow. Pushes that don't
+#     touch allowlisted files skip install + build entirely; the
+#     dep-free pr-review scripts still run to keep the sticky comment
+#     coherent with PR head.
 
 on:
   pull_request:
     types: [opened, synchronize, reopened]
-    # Only run when files that could plausibly be allowlisted actually
-    # change. This is a coarse filter — select-files.mjs still enforces
-    # the authoritative allowlist, but this short-circuits no-op runs.
-    paths:
-      - 'README.md'
-      - 'DIRECTORS_NOTES.md'
-      - 'LAUNCH_NOTES.md'
-      - 'docs/**/*.md'
-      - 'docs/**/*.markdown'
-      - 'tools/pr-review/**'
-      - '.github/workflows/pr-semantic-review.yml'
+    # Deliberately NO `paths:` filter. A paths gate on `pull_request`
+    # decides whether the workflow runs at all for a synchronize event —
+    # if a follow-up push touches only source files, the workflow would
+    # skip and the sticky comment would stay frozen on its last run's
+    # complaints. We prefer a slightly wasteful always-run: when no
+    # allowlisted files changed, select-files.mjs returns empty and the
+    # "Produce no-op index when nothing was selected" step below feeds a
+    # graceful empty-state through the normal upsert path, so the sticky
+    # stays coherent with PR head on every push.
 
 permissions:
   contents: read
@@ -44,6 +46,10 @@ concurrency:
 
 env:
   NODE_OPTIONS: "--max-old-space-size=4096"
+  # Playwright is a devDependency used only by tools/capture-screenshot.mjs.
+  # This workflow never touches it, so skip the Chromium download that
+  # `npm ci` would otherwise trigger (~15–30s on a cold runner).
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
 
 jobs:
   semantic-review:
@@ -61,12 +67,6 @@ jobs:
           node-version: 20
           cache: npm
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build SameDiff CLI
-        run: npm run build:cli
-
       - name: Fetch base ref
         id: base
         run: |
@@ -74,18 +74,28 @@ jobs:
           git fetch --no-tags --prune --depth=1 origin "$base_ref"
           echo "ref=origin/$base_ref" >> "$GITHUB_OUTPUT"
 
+      # Run the allowlist filter BEFORE installing dependencies. The
+      # pr-review scripts are node-only (no npm deps), so we can learn
+      # "is there anything worth analyzing?" cheaply and skip the heavy
+      # install + build steps when a push touches only source files.
       - name: Identify changed files
         id: changed
         run: |
           base="${{ steps.base.outputs.ref }}"
           git diff --name-only "$base"...HEAD > changed.txt
-          # Run the allowlist filter. Empty output is fine and handled by
-          # later steps.
           node tools/pr-review/select-files.mjs --in changed.txt > selected.txt
           count="$(grep -c . selected.txt || true)"
           echo "count=${count:-0}" >> "$GITHUB_OUTPUT"
           echo "selected files:"
           cat selected.txt || true
+
+      - name: Install dependencies
+        if: steps.changed.outputs.count != '0'
+        run: npm ci
+
+      - name: Build SameDiff CLI
+        if: steps.changed.outputs.count != '0'
+        run: npm run build:cli
 
       - name: Run SameDiff Lens on selected files
         if: steps.changed.outputs.count != '0'

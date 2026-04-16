@@ -60,6 +60,8 @@ export function renderComment(index) {
 
   const agg = aggregateCounts(analyzed);
   const contradictions = collect(analyzed, "contradictions");
+  const blockingContradictions = contradictions.filter((c) => c.confidence !== "low");
+  const advisoryContradictions = contradictions.filter((c) => c.confidence === "low");
   const commitmentShifts = collect(analyzed, "commitmentShifts");
   const actionAdded = collect(analyzed, "actionItemsAdded");
   const actionRemoved = collect(analyzed, "actionItemsRemoved");
@@ -68,32 +70,25 @@ export function renderComment(index) {
   // Header: files analyzed + aggregate count breakdown + status line.
   lines.push(headerLine(analyzed.length, skipped.length));
   lines.push(countsLine(agg));
-  lines.push(statusLine(contradictions.length));
+  lines.push(statusLine(blockingContradictions.length, advisoryContradictions.length));
   lines.push("");
 
-  if (contradictions.length > 0) {
+  if (blockingContradictions.length > 0) {
     lines.push("### Contradictions (blocking)");
     lines.push("");
-    for (const item of contradictions.slice(0, MAX_PER_CATEGORY)) {
-      const confTag = item.confidence ? ` _[${item.confidence}]_` : "";
-      lines.push(
-        `- ${fileTag(item.path)} — ${escape(item.summary)}${confTag} ${anchorTag(item)}`,
-      );
-      if (item.newLine) {
-        lines.push(`    - **NEW LINE:** ${escape(item.newLine)}`);
-      }
-      if (item.priorLineFound === false && item.priorLineUnavailableText) {
-        lines.push(`    - **PRIOR LINE:** _${escape(item.priorLineUnavailableText)}_`);
-      } else if (item.priorLine) {
-        lines.push(`    - **PRIOR LINE:** ${escape(item.priorLine)}`);
-      }
-      if (item.reason) {
-        lines.push(`    - **REASON:** \`${escape(item.reason)}\``);
-      }
-    }
-    if (contradictions.length > MAX_PER_CATEGORY) {
-      lines.push(`- _…and ${contradictions.length - MAX_PER_CATEGORY} more — see SARIF_`);
-    }
+    renderContradictionList(lines, blockingContradictions);
+    lines.push("");
+  }
+
+  if (advisoryContradictions.length > 0) {
+    lines.push("### Advisory contradictions (non-blocking)");
+    lines.push("");
+    lines.push(
+      "_Low-confidence matches (typically narrowing heuristics firing on " +
+        "additive changes). Reported for context; do not fail the check._",
+    );
+    lines.push("");
+    renderContradictionList(lines, advisoryContradictions);
     lines.push("");
   }
 
@@ -198,13 +193,44 @@ function countsLine(c) {
   return "Findings: " + parts.join(", ") + ".";
 }
 
-function statusLine(contradictionCount) {
-  if (contradictionCount > 0) {
-    return `Status: **Blocked** — ${contradictionCount} contradiction${pluralS(
-      contradictionCount,
-    )} must be resolved or explicitly accepted before this PR can merge.`;
+function statusLine(blockingCount, advisoryCount = 0) {
+  if (blockingCount > 0) {
+    const advisoryNote = advisoryCount > 0
+      ? ` (+${advisoryCount} advisory — see below)`
+      : "";
+    return `Status: **Blocked** — ${blockingCount} contradiction${pluralS(
+      blockingCount,
+    )} must be resolved or explicitly accepted before this PR can merge${advisoryNote}.`;
+  }
+  if (advisoryCount > 0) {
+    return `Status: **Advisory** — ${advisoryCount} low-confidence contradiction${pluralS(
+      advisoryCount,
+    )} surfaced; nothing blocks the merge.`;
   }
   return "Status: **Advisory** — no contradictions. Other findings inform but do not block merge.";
+}
+
+function renderContradictionList(lines, items) {
+  for (const item of items.slice(0, MAX_PER_CATEGORY)) {
+    const confTag = item.confidence ? ` _[${item.confidence}]_` : "";
+    lines.push(
+      `- ${fileTag(item.path)} — ${escape(item.summary)}${confTag} ${anchorTag(item)}`,
+    );
+    if (item.newLine) {
+      lines.push(`    - **NEW LINE:** ${escape(item.newLine)}`);
+    }
+    if (item.priorLineFound === false && item.priorLineUnavailableText) {
+      lines.push(`    - **PRIOR LINE:** _${escape(item.priorLineUnavailableText)}_`);
+    } else if (item.priorLine) {
+      lines.push(`    - **PRIOR LINE:** ${escape(item.priorLine)}`);
+    }
+    if (item.reason) {
+      lines.push(`    - **REASON:** \`${escape(item.reason)}\``);
+    }
+  }
+  if (items.length > MAX_PER_CATEGORY) {
+    lines.push(`- _…and ${items.length - MAX_PER_CATEGORY} more — see SARIF_`);
+  }
 }
 
 function renderSkipped(skipped) {
