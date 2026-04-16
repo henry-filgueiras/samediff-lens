@@ -1,15 +1,58 @@
 # SameDiff Lens
 
-SameDiff Lens is a local-first browser tool for comparing two text versions and surfacing the kinds of semantic changes that raw line diff often misses. Instead of focusing only on inserted and deleted lines, it highlights likely shifts in concepts, commitments, action items, renamed ideas, and possible contradictions.
+SameDiff Lens surfaces the kinds of semantic changes that raw line diff misses: commitment shifts, task drift, concept renames, and possible contradictions. No LLM, no cloud, no embeddings — just deterministic heuristics you can inspect.
 
 Feedback on false positives, false negatives, and confusing outputs is welcome via GitHub issues.
 
-## Live demo
+## CLI — try it in 10 seconds
 
-- [Try SameDiff Lens](https://henry-filgueiras.github.io/samediff-lens/)
+```bash
+npm install && npm run build:cli
+npm run samediff -- examples/hydra-doc-drift/before.md examples/hydra-doc-drift/after.md
+```
+
+Output:
+
+```text
+Δ SameDiff Summary
+
+  before.md → after.md
+
+COMMITMENT SHIFTS
+  - Nodes should register on boot and may deregister on grace...
+  + Nodes must register on boot and must deregister on gracef...
+    strengthens the commitment
+  - The system should retry failed jobs
+  + The system retries only idempotent jobs, up to 3 times wi...
+    narrows scope
+
+TASK DRIFT
+  + TODO added: benchmark against GMP for large cluster sizes
+  - TODO removed: validate karatsuba threshold for batch sizes
+
+CONCEPT RENAME (heuristic)
+  nodes should register → nodes must register  [high]
+
+POSSIBLE CONTRADICTIONS
+  ! B narrows protocol with limiting language that may contradict A's broader claim.
+
+ADDED CONCEPTS
+  + crdt based convergence healing
+  + suspected down event via gossip
+
+REMOVED CONCEPTS
+  - karatsuba threshold for batch
+  - applied atomically at epoch boundaries
+```
+
+Options: `--no-color` for plain text, `--md` for a full Markdown report, `--help` for usage.
+
+## Browser UI
+
+- [Live demo](https://henry-filgueiras.github.io/samediff-lens/)
 - Local run: `npm install && npm run dev`
 
-## Try it in 20 seconds
+### Try the browser UI in 20 seconds
 
 1. Load one of the built-in examples.
 2. Click `Compare`.
@@ -59,7 +102,7 @@ The v0 contract lives in [docs/v0-contract.md](docs/v0-contract.md).
 
 ## What v0 does
 
-This first pass runs entirely in the browser with no backend, no auth, no database, and no cloud calls. It uses simple deterministic heuristics to:
+SameDiff runs as a CLI tool or in the browser, with no backend, no auth, no database, and no cloud calls. It uses simple deterministic heuristics to:
 
 - extract likely added and removed concepts
 - detect changed commitments and constraint shifts
@@ -93,14 +136,26 @@ Requirements:
 - Node.js 20+
 - npm 10+
 
-Install and start:
+Install:
 
 ```bash
 npm install
+```
+
+Build and run the CLI:
+
+```bash
+npm run build:cli
+npm run samediff -- fileA.md fileB.md
+```
+
+Start the browser UI:
+
+```bash
 npm run dev
 ```
 
-Build for a production check:
+Build the browser UI for production:
 
 ```bash
 npm run build
@@ -109,7 +164,8 @@ npm run build
 Run the smoke tests:
 
 ```bash
-npm test
+npm test          # analysis engine tests
+npm run test:cli  # CLI integration tests
 ```
 
 ## Deploy to GitHub Pages
@@ -187,12 +243,24 @@ Animated GIF walkthrough: to be added.
 ## Repo shape
 
 ```text
+bin/
+  samediff.cjs          # CLI entry point wrapper
 docs/
   v0-contract.md
+examples/
+  hydra-doc-drift/      # example fixture for CLI demo
+    before.md
+    after.md
 src/
-  analysis/
-  components/
-  examples/
+  analysis/             # heuristic detection engine (shared)
+  cli/                  # CLI-specific code
+  components/           # browser UI components
+  examples/             # golden examples for UI + tests
+  lib/                  # shared utilities (report formatter, etc.)
+tools/
+  analysis.test.mjs     # engine smoke tests
+  cli.test.mjs          # CLI integration tests
+  build-cli.sh          # CLI build script
 ```
 
 ## Status
