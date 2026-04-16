@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Remember where the user ran us from, so relative paths work
+ORIG_DIR="$(pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Flags that take a value on the next arg. Their values must NOT be
+# path-resolved (they're category names, specs, etc.) — except the PATH
+# ones whose values are files.
+VALUE_FLAGS_NONPATH=("--only" "--exclude" "--fail-on" "--policy")
+VALUE_FLAGS_PATH=("-o" "--out" "--baseline" "--config")
+
+# Subcommands are pass-through tokens; don't path-resolve them.
+SUBCOMMANDS=("init" "policies" "baseline" "check")
+
+is_in() {
+  local needle="$1"; shift
+  for x in "$@"; do [[ "$x" == "$needle" ]] && return 0; done
+  return 1
+}
+
+# Resolve file arguments to absolute paths before cd-ing into the repo.
+# Two classes of value-taking flags: paths (resolve) and non-paths (pass through).
+resolved_args=()
+skip_next_mode=none   # none | path | raw
+first_positional=1    # track so we can recognize a leading subcommand
+for arg in "$@"; do
+  if [[ "$skip_next_mode" == "path" ]]; then
+    if [[ "$arg" == /* || "$arg" == -* ]]; then
+      resolved_args+=("$arg")
+    else
+      resolved_args+=("$ORIG_DIR/$arg")
+    fi
+    skip_next_mode=none
+    continue
+  fi
+  if [[ "$skip_next_mode" == "raw" ]]; then
+    resolved_args+=("$arg")
+    skip_next_mode=none
+    continue
+  fi
+  if [[ "$arg" == -* ]]; then
+    resolved_args+=("$arg")
+    if is_in "$arg" "${VALUE_FLAGS_PATH[@]}"; then
+      skip_next_mode=path
+    elif is_in "$arg" "${VALUE_FLAGS_NONPATH[@]}"; then
+      skip_next_mode=raw
+    fi
+  elif [[ "$arg" == "-" ]]; then
+    resolved_args+=("$arg")
+    first_positional=0
+  elif [[ "$first_positional" -eq 1 ]] && is_in "$arg" "${SUBCOMMANDS[@]}"; then
+    resolved_args+=("$arg")
+    first_positional=0
+  elif [[ "$arg" == /* ]]; then
+    resolved_args+=("$arg")
+    first_positional=0
+  else
+    resolved_args+=("$ORIG_DIR/$arg")
+    first_positional=0
+  fi
+done
+
+cd "$SCRIPT_DIR"
+
+# Build if dist-cli is missing or stale
+rebuild=0
+if [ ! -f dist-cli/cli/index.js ]; then
+  rebuild=1
+else
+  for src in src/cli/*.ts src/analysis/*.ts src/lib/report.ts; do
+    if [ -e "$src" ] && [ "$src" -nt dist-cli/cli/index.js ]; then
+      rebuild=1
+      break
+    fi
+  done
+fi
+if [ "$rebuild" -eq 1 ]; then
+  bash tools/build-cli.sh >&2
+fi
+
+SAMEDIFF_ORIG_DIR="$ORIG_DIR" exec node dist-cli/cli/index.js "${resolved_args[@]}"

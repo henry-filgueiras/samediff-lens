@@ -499,7 +499,7 @@ export function buildSummary(parts: {
   }
 
   if (parts.renamedIdeas.length > 0) {
-    highlights.push(`${parts.renamedIdeas.length} rename guess${plural(parts.renamedIdeas.length)}`);
+    highlights.push(`${parts.renamedIdeas.length} rename guess${parts.renamedIdeas.length === 1 ? "" : "es"}`);
   }
 
   const conceptCount = parts.addedConcepts.length + parts.removedConcepts.length;

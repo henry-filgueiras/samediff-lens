@@ -1,15 +1,200 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/logo-dark.svg">
+    <img src="docs/logo.svg" alt="SameDiff Lens logo" width="160" height="160">
+  </picture>
+</p>
+
 # SameDiff Lens
 
-SameDiff Lens is a local-first browser tool for comparing two text versions and surfacing the kinds of semantic changes that raw line diff often misses. Instead of focusing only on inserted and deleted lines, it highlights likely shifts in concepts, commitments, action items, renamed ideas, and possible contradictions.
+SameDiff Lens surfaces the kinds of semantic changes that raw line diff misses: commitment shifts, task drift, concept renames, and possible contradictions. No LLM, no cloud, no embeddings — just deterministic heuristics you can inspect.
+
+A repo can declare a **semantic-drift policy** in `.samediff.json` and enforce it consistently in CI and local workflows.
 
 Feedback on false positives, false negatives, and confusing outputs is welcome via GitHub issues.
 
-## Live demo
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/infographic-overview-dark.svg">
+    <img src="docs/infographic-overview.svg" alt="SameDiff Lens overview: compare two versions, detect semantic drift, report structured findings with a drift score." width="880">
+  </picture>
+</p>
 
-- [Try SameDiff Lens](https://henry-filgueiras.github.io/samediff-lens/)
+## Three workflows
+
+SameDiff is designed around three shapes of work. Each has a named path.
+
+### 1. Local exploratory diff
+
+Scratch-pad mode. What actually changed between two versions of a doc?
+
+```bash
+npm install && npm run build:cli
+samediff before.md after.md
+```
+
+Quick variants:
+
+```bash
+samediff before.md after.md --only contradictions   # focus
+samediff before.md after.md --compact               # grep-friendly lines
+samediff before.md after.md --md -o review.md       # shareable report
+cat draft.md | samediff - reference.md              # stdin piping
+samediff --git HEAD~1 -- spec.md                    # diff against git
+```
+
+There are five example pairs in `examples/`, from simple to advanced — see [examples/README.md](examples/README.md).
+
+### 2. CI with baseline-aware gating
+
+You want CI to enforce a drift contract: commitment shifts and contradictions must be flagged, concept churn can pass. You declare the contract once and check it in.
+
+```bash
+# One-time setup in your repo
+samediff init                              # writes .samediff.json
+samediff baseline docs/spec.md docs/spec.md   # writes .samediff-baseline.json
+                                             # (use any two references you trust)
+git add .samediff.json .samediff-baseline.json
+```
+
+In CI:
+
+```bash
+samediff --git origin/main -- docs/spec.md
+# the config's default_policy kicks in automatically
+# non-zero exit => CI fails on the defined contract
+```
+
+No flags — policy comes from the checked-in config. Local developers see the same behavior because the config is in-tree.
+
+### 3. Gradual adoption (only new drift fails)
+
+For repos with existing drift you don't want to fix right now. "Don't yell at me about yesterday's drift. Tell me what I'm adding today."
+
+```bash
+samediff init                                 # default_policy = adoption
+samediff baseline docs/spec.md docs/spec.md   # snapshot current state
+```
+
+Now every run uses the `adoption` built-in policy, which:
+
+- subtracts the baseline from both findings and drift score
+- fails only on **new** drift ≥ moderate severity (`score:4`)
+- focuses on the dangerous categories (commitment shifts, contradictions)
+
+In CI:
+
+```bash
+samediff --git origin/main -- docs/spec.md
+# passes if your change didn't make drift worse than the baseline
+```
+
+As drift gets cleaned up, update the baseline (`samediff baseline …`) and the ratchet tightens.
+
+---
+
+## Config file (`.samediff.json`)
+
+`samediff init` writes a starter that looks like this:
+
+```json
+{
+  "default_policy": "adoption",
+  "policies": {
+    "adoption": {
+      "baseline": ".samediff-baseline.json",
+      "include": ["commitment-shifts", "contradictions"],
+      "fail_on": "score:4"
+    },
+    "strict": { "fail_on": "commitment-shifts,contradictions" },
+    "advisory": { "fail_on": null }
+  }
+}
+```
+
+SameDiff walks up from the current directory to find `.samediff.json` (stopping at `$HOME` or the filesystem root). Use `--config <path>` to override, or `--no-config` to disable.
+
+### Built-in policies
+
+Always available, even without a config file:
+
+| Policy | Use when | Behavior |
+| ------ | -------- | -------- |
+| `adoption` | Messy or newly onboarded repo | Uses `.samediff-baseline.json`; fails only on NEW drift (score ≥ 4) in commits / contradictions |
+| `strict` | Mature repo that's paid down drift debt | Fails on any commitment shift or contradiction. No baseline. |
+| `docs-only` | Design docs / essays / prose repos | Focuses on commits, contradictions, concepts, todos; fails at score ≥ 5 |
+| `advisory` | PR comment / annotation bot | Reports only; never fails the build |
+
+List them anywhere: `samediff policies`.
+
+### Precedence
+
+Effective options are merged from four layers, highest wins:
+
+1. Explicit CLI flags (`--fail-on`, `--only`, `--baseline`, …)
+2. Selected policy (via `--policy <name>` or `default_policy` in config)
+3. Top-level config block (`baseline`, `include`, `exclude`, `fail_on`, …)
+4. Built-in defaults
+
+Array fields (`include`, `exclude`) **replace** across layers — they do not union. If a policy sets `include: ["commits"]` and you pass `--only concepts`, the effective include is `["concepts"]` alone.
+
+`fail_on: null` (or `"none"` / `"never"`) means "never fail the build" — that's how `advisory` works, and it's what `--fail-on none` does from the CLI.
+
+### Named policies in the config
+
+You can add or override any policy in the config:
+
+```json
+{
+  "default_policy": "my-repo-policy",
+  "policies": {
+    "my-repo-policy": {
+      "baseline": ".samediff-baseline.json",
+      "include": ["commitment-shifts", "contradictions", "action-items-added"],
+      "exclude": ["concept-renames"],
+      "fail_on": "score:5"
+    }
+  }
+}
+```
+
+Built-in names (`adoption`, `strict`, `docs-only`, `advisory`) can be redefined in your config — your version wins. `samediff policies` shows `(override)` next to those.
+
+---
+
+## All the flags
+
+Use `samediff --help` for the full list. Grouped here for reference:
+
+**Output formats:** `--md`, `--html`, `--json`, `--compact`, `--github`, `--stats`, `--score`, `-o <file>`
+
+**Focus / noise:** `--only`, `--exclude`, `--baseline`, `--no-baseline`
+
+**CI gating:** `--fail-on any|score:N|<cats>|none`, `--exit-code` (legacy)
+
+**Config / policy:** `--config <path>`, `--no-config`, `--policy <name>`, `--no-policy`
+
+**Subcommands:** `samediff init`, `samediff policies`, `samediff baseline <left> <right>`, `samediff check <left> <right>`
+
+**Inputs:** `<left> <right>`, `- <right>` or `<left> -` (stdin), `--git <ref> -- <file>`
+
+### Pipe-friendly outputs
+
+```bash
+samediff a.md b.md --compact          # one finding per line (CATEGORY\tdetail)
+samediff a.md b.md --stats            # one-line key=value counts
+samediff a.md b.md --github           # GitHub Actions annotations
+samediff a.md b.md --json             # canonical structured result
+```
+
+The `--json` output includes an additive `policy` block when a config/policy shaped the run, plus a `filters` block with baseline provenance. Schema version is stable at `"1"`.
+
+## Browser UI
+
+- [Live demo](https://henry-filgueiras.github.io/samediff-lens/)
 - Local run: `npm install && npm run dev`
 
-## Try it in 20 seconds
+### Try the browser UI in 20 seconds
 
 1. Load one of the built-in examples.
 2. Click `Compare`.
@@ -59,7 +244,7 @@ The v0 contract lives in [docs/v0-contract.md](docs/v0-contract.md).
 
 ## What v0 does
 
-This first pass runs entirely in the browser with no backend, no auth, no database, and no cloud calls. It uses simple deterministic heuristics to:
+SameDiff runs as a CLI tool or in the browser, with no backend, no auth, no database, and no cloud calls. It uses simple deterministic heuristics to:
 
 - extract likely added and removed concepts
 - detect changed commitments and constraint shifts
@@ -93,14 +278,26 @@ Requirements:
 - Node.js 20+
 - npm 10+
 
-Install and start:
+Install:
 
 ```bash
 npm install
+```
+
+Build and run the CLI:
+
+```bash
+npm run build:cli
+npm run samediff -- fileA.md fileB.md
+```
+
+Start the browser UI:
+
+```bash
 npm run dev
 ```
 
-Build for a production check:
+Build the browser UI for production:
 
 ```bash
 npm run build
@@ -109,7 +306,8 @@ npm run build
 Run the smoke tests:
 
 ```bash
-npm test
+npm test          # analysis engine tests
+npm run test:cli  # CLI integration tests
 ```
 
 ## Deploy to GitHub Pages
@@ -187,12 +385,26 @@ Animated GIF walkthrough: to be added.
 ## Repo shape
 
 ```text
+bin/
+  samediff.cjs          # CLI entry point wrapper
 docs/
   v0-contract.md
+examples/
+  01-modal-shift/       # simple: may→must
+  02-todo-drift/        # simple: checklist changes
+  03-api-contract/      # medium: spec narrowing
+  04-prompt-policy/     # medium: behavioral contract
+  05-hydra-doc-drift/   # advanced: full architecture rewrite
 src/
-  analysis/
-  components/
-  examples/
+  analysis/             # heuristic detection engine (shared)
+  cli/                  # CLI-specific code
+  components/           # browser UI components
+  examples/             # golden examples for UI + tests
+  lib/                  # shared utilities (report formatter, etc.)
+tools/
+  analysis.test.mjs     # engine smoke tests
+  cli.test.mjs          # CLI integration tests
+  build-cli.sh          # CLI build script
 ```
 
 ## Status
