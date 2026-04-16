@@ -42,9 +42,6 @@ concurrency:
   group: samediff-pr-review-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
-env:
-  NODE_OPTIONS: "--max-old-space-size=4096"
-
 jobs:
   semantic-review:
     runs-on: ubuntu-latest
