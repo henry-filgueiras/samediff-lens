@@ -68,9 +68,15 @@ test("comparing hydra example produces task drift", () => {
   assert.match(output, /validate karatsuba threshold/);
 });
 
-test("comparing hydra example produces concept renames", () => {
+test("hydra example: concept renames are deduped against commitment shifts", () => {
+  // Every rename guess the detector would make on this fixture is on a
+  // sentence pair that ALSO fires a commitment shift, so the dedup step
+  // in analyzeTextPair correctly suppresses the whole section. Positive
+  // rename coverage lives in tools/analysis.test.mjs on inputs that
+  // don't coincide with commitment-shift pairs.
   const output = run(beforeFile, afterFile);
-  assert.match(output, /CONCEPT RENAME/);
+  assert.match(output, /COMMITMENT SHIFTS/);
+  assert.doesNotMatch(output, /CONCEPT RENAME/);
 });
 
 test("comparing hydra example produces contradiction hints", () => {

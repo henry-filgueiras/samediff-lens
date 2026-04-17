@@ -51,19 +51,35 @@ export function analyzeTextPair(versionA: string, versionB: string): AnalysisRes
 
   const actionDiff = compareActionItems(extractActionItems(aUnits), extractActionItems(bUnits));
 
+  // Concept-rename detection runs across the same matched pairs as
+  // commitment-shift detection, so a modal-word edit ("can" → "must")
+  // typically fires both: a shift on the whole sentence and a rename
+  // on the short phrase that contains the modal. Those are the same
+  // observation from two angles, and showing both makes the sticky
+  // comment repeat itself. Suppress a rename when its underlying
+  // sentence pair is already covered by a commitment shift.
+  const rawRenamedIdeas = detectRenameIdeas([
+    ...pairs,
+    ...unmatchedA.flatMap((a) =>
+      unmatchedB.map((b) => ({
+        a,
+        b,
+        similarity: 0,
+      })),
+    ),
+  ]);
+  const commitmentShiftPairs = new Set(
+    changedCommitmentsEvidence.map((ev) => `${ev.versionA}\u0000${ev.versionB}`),
+  );
+  const renamedIdeas = rawRenamedIdeas.filter((r) => {
+    if (r.versionA === undefined || r.versionB === undefined) return true;
+    return !commitmentShiftPairs.has(`${r.versionA}\u0000${r.versionB}`);
+  });
+
   const result: AnalysisResult = {
     addedConcepts: addedConceptsEvidence.map((item) => item.phrase),
     removedConcepts: removedConceptsEvidence.map((item) => item.phrase),
-    renamedIdeas: detectRenameIdeas([
-      ...pairs,
-      ...unmatchedA.flatMap((a) =>
-        unmatchedB.map((b) => ({
-          a,
-          b,
-          similarity: 0,
-        })),
-      ),
-    ]),
+    renamedIdeas,
     changedCommitments: changedCommitmentsEvidence.map((item) => item.summary),
     actionItemsAdded: actionDiff.added,
     actionItemsRemoved: actionDiff.removed,

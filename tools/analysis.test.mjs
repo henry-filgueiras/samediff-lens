@@ -142,6 +142,45 @@ test("revised design spec example surfaces broad architectural and operational d
   );
 });
 
+test("concept rename fires when no commitment shift covers the pair", () => {
+  // Positive coverage for the rename detector — dedup must NOT swallow
+  // renames that have no corresponding commitment shift. A simple tool
+  // swap is the canonical rename shape.
+  const a = "The team uses Terraform for infrastructure.";
+  const b = "The team uses Pulumi for infrastructure.";
+  const result = analyzeTextPair(a, b);
+
+  assert.equal(result.changedCommitmentsEvidence.length, 0);
+  assert.ok(
+    result.renamedIdeas.some(
+      (r) => /terraform/i.test(r.from) && /pulumi/i.test(r.to),
+    ),
+    "expected Terraform→Pulumi rename to survive (no commitment shift on this pair)",
+  );
+});
+
+test("modal-word shift does not double up as a concept rename", () => {
+  // Regression guard: when a commitment shift fires on a sentence pair
+  // (e.g. "can" → "must"), the rename detector used to ALSO fire on the
+  // same pair because most tokens are shared. That's the same observation
+  // from two angles — suppress the rename so the sticky comment doesn't
+  // repeat itself.
+  const a = "A repo can declare a semantic-drift policy and enforce it in CI.";
+  const b = "A repo must declare a semantic-drift policy and enforce it in CI.";
+  const result = analyzeTextPair(a, b);
+
+  assert.equal(
+    result.changedCommitmentsEvidence.length,
+    1,
+    "expected a commitment shift on the can → must change",
+  );
+  assert.deepEqual(
+    result.renamedIdeas,
+    [],
+    "rename on the same sentence pair should be deduplicated",
+  );
+});
+
 test("identical text stays low-drift", () => {
   const text = "The system should retry failed jobs.";
   const result = analyzeTextPair(text, text);
