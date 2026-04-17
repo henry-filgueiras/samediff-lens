@@ -161,6 +161,98 @@ test("clustering collapses multiple commitment shifts on the same subject", () =
   );
 });
 
+// ── Regression: cross-section contradiction guard ─────────────────────────
+
+test("06-secure-gateway: Performance line never pairs with Authentication line as a contradiction", () => {
+  // Original failure: a `negation-flip` contradiction was emitted between
+  // old line 10 (**Performance**: Latency overhead should not exceed 50ms…)
+  // and new line 7 (**Authentication**: Incoming requests should be
+  // authenticated…), supported only by generic `should` + `request` token
+  // overlap. That bad pair then became the narrative headline. The engine's
+  // cross-section guard + expanded structural strip list must reject this
+  // pair before it ever reaches the narrative layer.
+  const r = runJson(
+    exPath("06-secure-gateway-doc-drift", "left.md"),
+    exPath("06-secure-gateway-doc-drift", "right.md"),
+  );
+
+  for (const c of r.findings.contradictions) {
+    const before = (c.evidence.before ?? "").toLowerCase();
+    const after = (c.evidence.after ?? "").toLowerCase();
+    const isBadPair =
+      before.includes("**performance**") && after.includes("**authentication**");
+    const isReverseBadPair =
+      before.includes("**authentication**") && after.includes("**performance**");
+    assert.ok(
+      !isBadPair && !isReverseBadPair,
+      `cross-section contradiction leaked through engine guard:\n  before: ${c.evidence.before}\n  after: ${c.evidence.after}`,
+    );
+  }
+
+  // Also: this assertion is meaningless if no contradictions fired at all.
+  // The legit same-section Performance reversal (should not exceed 50ms →
+  // should be minimized) must still surface — guards must not be so strict
+  // that they nuke the real signal too.
+  const realReversal = r.findings.contradictions.find(
+    (c) =>
+      /\*\*performance\*\*/i.test(c.evidence.before ?? "") &&
+      /\*\*performance\*\*/i.test(c.evidence.after ?? ""),
+  );
+  assert.ok(
+    realReversal,
+    "expected the legitimate same-section Performance reversal to still fire",
+  );
+
+  // And the narrative headline must reflect a real, same-subject finding —
+  // not the cross-section FP.
+  assert.ok(r.narrative.headline, "expected a narrative headline on 06");
+  const headline = r.narrative.headline.toLowerCase();
+  const headlineMixesPerfAndAuth =
+    headline.includes("performance") && headline.includes("authentication");
+  assert.ok(
+    !headlineMixesPerfAndAuth,
+    `narrative headline still mixes Performance and Authentication: ${r.narrative.headline}`,
+  );
+});
+
+test("narrative quarantines weak contradictions whose before/after subjects disagree", () => {
+  // Belt-and-suspenders: even if a future regression re-opens the engine
+  // guard, the narrative layer must not promote a contradiction whose
+  // before-subject and after-subject extract to different topic nouns.
+  const examples = [
+    "01-modal-shift",
+    "03-api-contract",
+    "04-prompt-policy",
+    "05-hydra-doc-drift",
+    "06-secure-gateway-doc-drift",
+  ];
+  for (const ex of examples) {
+    const r = runJson(exPath(ex, "left.md"), exPath(ex, "right.md"));
+    for (const issue of r.narrative.issues) {
+      // Only check contradiction-derived top issues. (Triggers carry the
+      // tag set by classify.ts.)
+      const fromContradiction = (issue.evidence.triggers ?? []).some((t) =>
+        String(t).startsWith("contradiction:"),
+      );
+      if (!fromContradiction) continue;
+      if (issue.confidence === "high") continue; // high-confidence may keep
+      const before = (issue.evidence.before ?? "").toLowerCase();
+      const after = (issue.evidence.after ?? "").toLowerCase();
+      // Pull a few topic words to check for cross-topic mixes
+      const topics = ["performance", "authentication", "encryption", "audit", "logging"];
+      const beforeTopics = topics.filter((t) => before.includes(`**${t}**`));
+      const afterTopics = topics.filter((t) => after.includes(`**${t}**`));
+      if (beforeTopics.length > 0 && afterTopics.length > 0) {
+        const overlap = beforeTopics.some((t) => afterTopics.includes(t));
+        assert.ok(
+          overlap,
+          `${ex}: cross-topic contradiction in TOP issues:\n  ${issue.title}\n  before topics: ${beforeTopics}\n  after topics: ${afterTopics}`,
+        );
+      }
+    }
+  }
+});
+
 test("--no-narrative omits the narrative field from --json", () => {
   const raw = execFileSync(
     "node",

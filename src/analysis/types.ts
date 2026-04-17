@@ -102,6 +102,17 @@ export type Unit = {
   isActionItem: boolean;
   isCommitmentLike: boolean;
   isDirectiveLike: boolean;
+  /**
+   * Most-specific topical context the unit sits inside, lowercased and
+   * normalised (no markdown, single-spaced). Filled by `extractUnits`:
+   *   - inline `**Topic**:` prefix on the line wins (e.g. "performance"
+   *     for `1. **Performance**: Latency overhead should not...`)
+   *   - else most recent `# / ## / ###` heading
+   *   - else null
+   * Used by contradiction detection to refuse cross-topic pairings
+   * supported only by generic modal/structural overlap.
+   */
+  section?: string | null;
 };
 
 export type MatchedPair = {

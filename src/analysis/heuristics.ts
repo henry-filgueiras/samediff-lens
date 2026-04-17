@@ -59,6 +59,32 @@ const HARD_BOUNDARY_STOP_WORDS = new Set([
 const GENERIC_TERMS = new Set(["system", "text", "version", "tool", "registry", "membership"]);
 const ANCHOR_GENERIC_TERMS = new Set(["system", "text", "version", "tool"]);
 
+/**
+ * Tokens that are too generic on their own to establish that two
+ * sentences are *about the same subject*. Stripped from the shared-anchor
+ * set used by contradiction detection. If stripping leaves nothing
+ * behind, the pair has no real subject continuity and isn't a candidate.
+ *
+ * Includes:
+ *   - All ANCHOR_GENERIC_TERMS (system/text/version/tool)
+ *   - Modal verbs (should/must/may/can/will/shall/would/could) — these
+ *     pivot the polarity, they don't anchor a subject
+ *   - High-frequency structural / agentless nouns that recur across
+ *     unrelated bullet points in the same document (request, policy,
+ *     service, data, value, default, case)
+ */
+const STRUCTURAL_ANCHOR_TOKENS = new Set([
+  "system", "text", "version", "tool",
+  "should", "must", "may", "can", "will", "shall", "would", "could",
+  "request", "requests", "requested",
+  "policy", "policies",
+  "service", "services",
+  "data", "value", "values",
+  "default", "case", "cases",
+  "thing", "things",
+  "etc",
+]);
+
 const LEADING_VERBISH = new Set([
   "be",
   "is",
@@ -158,12 +184,41 @@ const TOKEN_PATTERN = /[a-z0-9]+/g;
 // The goal is inspectability, not deep semantic understanding.
 
 export function extractUnits(text: string): Unit[] {
+  const units: Unit[] = [];
+  let currentHeading: string | null = null;
+
+  for (const line of text.split(/\n+/).map((l) => l.trim()).filter(Boolean)) {
+    const headingMatch = line.match(/^(#{1,6})\s+(.+?)\s*$/);
+    if (headingMatch) {
+      currentHeading = normalizeSectionLabel(headingMatch[2]);
+    }
+
+    // Inline `**Topic**:` (or `__Topic__:`) prefix wins over heading for
+    // this line — it identifies the bullet's own subject. Allows an
+    // optional bullet/list marker first ("1. **Performance**:").
+    const topicMatch = line.match(
+      /^(?:[-*\u2022]|\d+[.)])?\s*(?:\*\*|__)([^*_\n]{1,80}?)(?:\*\*|__)\s*[:\u2014\u2013\u2010-]/,
+    );
+    const lineSection = topicMatch
+      ? normalizeSectionLabel(topicMatch[1])
+      : currentHeading;
+
+    for (const raw of splitLineIntoUnits(line)) {
+      const u = buildUnit(raw);
+      u.section = lineSection;
+      units.push(u);
+    }
+  }
+
+  return units;
+}
+
+function normalizeSectionLabel(text: string): string {
   return text
-    .split(/\n+/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .flatMap((line) => splitLineIntoUnits(line))
-    .map((raw) => buildUnit(raw));
+    .replace(/[*_`]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
 }
 
 function splitLineIntoUnits(line: string): string[] {
@@ -453,14 +508,33 @@ export function detectPossibleContradictions(aUnits: Unit[], bUnits: Unit[]): Co
       // `matchUnits` (0.12) on purpose — legit negation/required/optional
       // flips often live in short sentences that share exactly one
       // anchor (jaccard ≈ 0.11), and we want to keep those.
-      if (jaccard(a.contentTokens, b.contentTokens) < 0.1) return;
+      const sim = jaccard(a.contentTokens, b.contentTokens);
+      if (sim < 0.1) return;
 
+      // Strip generic modal/structural tokens before deciding whether the
+      // pair has *real* subject continuity. "should" + "request" overlap is
+      // not enough on its own to justify accusing two sentences of
+      // contradicting each other.
       const sharedAnchors = intersection(a.contentTokens, b.contentTokens).filter(
-        (token) => !ANCHOR_GENERIC_TERMS.has(token),
+        (token) => !STRUCTURAL_ANCHOR_TOKENS.has(token),
       );
 
       if (sharedAnchors.length === 0) {
         return;
+      }
+
+      // Cross-section guard: when both sides sit inside topical contexts
+      // (markdown heading or `**Topic**:` prefix) and those contexts
+      // disagree, the pair must clear a stronger bar than same-section
+      // pairs. This catches the classic FP of pairing one bullet's
+      // **Performance** sentence with another bullet's **Authentication**
+      // sentence just because they share `should`/`request`.
+      const aSec = a.section ?? null;
+      const bSec = b.section ?? null;
+      const crossSection = aSec !== null && bSec !== null && aSec !== bSec;
+      if (crossSection) {
+        if (sharedAnchors.length < 2) return;
+        if (sim < 0.18) return;
       }
 
       if (!containsAny(a.raw, NARROWING_MARKERS) && containsAny(b.raw, NARROWING_MARKERS)) {

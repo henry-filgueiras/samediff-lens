@@ -61,9 +61,71 @@ The core analysis engine in `src/analysis/` is shared between both surfaces. It 
 **Example spectrum (examples/):**
 01-modal-shift → 02-todo-drift → 03-api-contract → 04-prompt-policy → 05-hydra-doc-drift
 
-**Test counts:** 28 engine tests + 100 CLI integration tests + 24 PR-reviewer tests + 9 narrative tests, all passing
+**Test counts:** 28 engine tests + 100 CLI integration tests + 24 PR-reviewer tests + 11 narrative tests, all passing
 
 ## Devlog
+
+### 2026-04-17 — Claude Opus 4.7 — Cross-section contradiction guard
+
+The narrative layer's first headline on `06-secure-gateway-doc-drift`
+was wrong: "Policy reversed on auth: **Performance**: Latency overhead
+should not... → **Authentication**: Incoming requests should be...".
+The narrative renderer was faithful — the bug was that
+`detectPossibleContradictions` had emitted a `negation-flip` between
+old line 10 (Performance) and new line 7 (Authentication), supported
+only by `should` + `request` token overlap. Those are generic modal /
+structural words, not subject continuity.
+
+Two-layer fix:
+
+**Engine guard (heuristics.ts).**
+- New `STRUCTURAL_ANCHOR_TOKENS` set, broader than the existing
+  `ANCHOR_GENERIC_TERMS`. Adds modal verbs (should/must/may/can/will/
+  shall/would/could) and high-frequency agentless nouns (request,
+  policy, service, data, value, default, case). Stripped from the
+  shared-anchor set; an empty residual now rejects the pair.
+- `Unit.section` field, populated by an extended `extractUnits` that
+  walks lines tracking the most recent markdown heading and recognising
+  inline `**Topic**:` (or `__Topic__:`) prefixes — the latter handles
+  bullet-level sub-sections like `1. **Performance**: ...` that aren't
+  real headings but *are* topic boundaries. `normalizeSectionLabel`
+  strips markdown punctuation and lowercases.
+- New cross-section guard inside `detectPossibleContradictions`: when
+  both units carry sections and they disagree, require ≥2 strong shared
+  anchors AND jaccard ≥ 0.18. Same-section pairs keep the original
+  threshold so the existing legitimate detections all survive.
+
+**Narrative defense-in-depth (buildNarrative.ts).** Added
+`isWeakContradiction` quarantine: if an Issue traces to a contradiction
+finding (carried via the `contradiction:<reason>` trigger tag set in
+classify.ts), and `extractSubject` returns different non-empty subjects
+for before vs after, and confidence isn't `high`, the issue is
+relegated to the quiet bucket. Headline / top issues never see it.
+
+**Anti-hallucination contract preserved.** No template was loosened.
+Issues still cite raw findings; titles still fill slots only from
+evidence verbatim. The fix narrows what gets *promoted*, not how it
+gets *worded*.
+
+**Regression coverage.** Two new tests in `tools/narrative.test.mjs`:
+1. `06-secure-gateway: Performance line never pairs with Authentication
+   line as a contradiction` — direct assertion that the original FP
+   pair (in either direction) is absent from `findings.contradictions`,
+   AND the legitimate same-section Performance reversal still fires,
+   AND the headline isn't a Performance/Authentication mix.
+2. `narrative quarantines weak contradictions whose before/after
+   subjects disagree` — generic check across all examples that
+   contradiction-derived top issues never mix `**Topic A**` on one side
+   with `**Topic B**` on the other (unless confidence is high).
+
+**Resulting headlines after the fix.**
+- 06: now reads "Policy reversed on latency: **Performance**: Latency
+  overhead should not exceed 50ms... → **Performance**: Latency
+  overhead should be minimized" — the *real* hard-threshold-to-soft-
+  aspiration reversal.
+- 03: bonus improvement — the narrative now leads with "Requirement
+  reversed on shipping_address" (same-section required↔optional flip
+  surfaced through the cleaner anchor set).
 
 ### 2026-04-17 — Claude Opus 4.7 — Narrative interpretation layer
 

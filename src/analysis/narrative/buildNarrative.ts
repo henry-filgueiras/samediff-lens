@@ -66,7 +66,8 @@ export function buildNarrative(diff: DiffResult): NarrativeReport {
       salience < QUIET_THRESHOLD ||
       issue.kind === "observation" ||
       issue.kind === "task-scope-shift" ||
-      (issue.kind === "rename" && issue.confidence !== "high");
+      (issue.kind === "rename" && issue.confidence !== "high") ||
+      isWeakContradiction(issue);
     if (isQuiet) quiet.push(issue);
     else top.push(issue);
   }
@@ -102,6 +103,27 @@ export function buildNarrative(diff: DiffResult): NarrativeReport {
 
 function allTasks(issues: Issue[]): boolean {
   return issues.length > 0 && issues.every((i) => i.kind === "task-scope-shift");
+}
+
+/**
+ * Defense-in-depth quarantine for contradiction-derived issues whose
+ * before-subject and after-subject disagree. The engine guard already
+ * rejects most of these, but if a weak contradiction survives, this
+ * keeps it out of the headline and top section. The issue still appears
+ * in the quiet bucket so a curious reader can find it.
+ */
+function isWeakContradiction(issue: Issue): boolean {
+  const fromContradiction = issue.evidence.triggers.some((t) =>
+    t.startsWith("contradiction:"),
+  );
+  if (!fromContradiction) return false;
+  const beforeSubj = extractSubject(issue.evidence.before, null).toLowerCase();
+  const afterSubj = extractSubject(null, issue.evidence.after).toLowerCase();
+  if (!beforeSubj || !afterSubj) return false;
+  if (beforeSubj === afterSubj) return false;
+  // Two different non-empty subjects extracted from the two sides — the
+  // contradiction is almost certainly cross-topic.
+  return issue.confidence !== "high";
 }
 
 function synthesizeTaskHeadline(top: Issue[], quiet: Issue[]): string {
