@@ -96,10 +96,18 @@ export function renderComment(index) {
     lines.push("### Commitment shifts");
     lines.push("");
     for (const item of commitmentShifts.slice(0, MAX_PER_CATEGORY)) {
-      const triggers = item.triggers?.length ? ` _(${item.triggers.join(", ")})_` : "";
+      const headline = item.triggers?.length
+        ? item.triggers.join(", ")
+        : "commitment change";
       lines.push(
-        `- ${fileTag(item.path)} — ${escape(item.summary)}${triggers} ${anchorTag(item)}`,
+        `- ${fileTag(item.path)} — ${escape(headline)} ${anchorTag(item)}`,
       );
+      if (item.before) {
+        lines.push(`    - **BEFORE:** ${escape(item.before)}`);
+      }
+      if (item.after) {
+        lines.push(`    - **AFTER:** ${escape(item.after)}`);
+      }
     }
     if (commitmentShifts.length > MAX_PER_CATEGORY) {
       lines.push(`- _…and ${commitmentShifts.length - MAX_PER_CATEGORY} more_`);
