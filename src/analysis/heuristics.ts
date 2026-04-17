@@ -5,6 +5,9 @@ import type {
   ContradictionEvidence,
   MatchedPair,
   RenamedIdea,
+  TaskState,
+  TaskStatusChange,
+  TaskTransition,
   Unit,
 } from "./types";
 
@@ -361,19 +364,145 @@ export function extractActionItems(units: Unit[]): string[] {
   return uniqueStrings(units.filter((unit) => unit.isActionItem).map((unit) => unit.raw));
 }
 
-export function compareActionItems(aItems: string[], bItems: string[]) {
-  const normalizedA = new Map(aItems.map((item) => [normalize(item), item]));
-  const normalizedB = new Map(bItems.map((item) => [normalize(item), item]));
+/**
+ * Compare two lists of action-item raw strings, treating markdown
+ * checklists as a structured mini-language: the body of the task is
+ * the identity, the `[ ]` / `[x]` / TODO marker is its state.
+ *
+ * The richer return shape (`statusChanges`) is the primary output and
+ * captures all six transitions:
+ *     [ ] → [x]         completed
+ *     [x] → [ ]         reopened
+ *     absent → [ ]      added-open
+ *     absent → [x]      added-completed
+ *     [ ] → absent      removed-open
+ *     [x] → absent      removed-completed
+ *
+ * `added` / `removed` are kept for backward compatibility with renderers
+ * and consumers that still want flat string lists. **They contain only
+ * the simple add/remove cases — toggles do NOT appear there.** That is
+ * the whole point of this normalisation: a checkbox flip is one event,
+ * not two.
+ */
+export function compareActionItems(
+  aItems: string[],
+  bItems: string[],
+): {
+  statusChanges: TaskStatusChange[];
+  added: string[];
+  removed: string[];
+} {
+  const aMap = indexTasks(aItems);
+  const bMap = indexTasks(bItems);
 
-  const added = [...normalizedB.entries()]
-    .filter(([normalized]) => !normalizedA.has(normalized))
-    .map(([, value]) => value);
+  const statusChanges: TaskStatusChange[] = [];
+  const added: string[] = [];
+  const removed: string[] = [];
 
-  const removed = [...normalizedA.entries()]
-    .filter(([normalized]) => !normalizedB.has(normalized))
-    .map(([, value]) => value);
+  const allKeys = new Set<string>([...aMap.keys(), ...bMap.keys()]);
 
-  return { added, removed };
+  for (const key of allKeys) {
+    const a = aMap.get(key);
+    const b = bMap.get(key);
+
+    if (a && b) {
+      if (a.state === b.state) continue; // unchanged — not drift
+      const transition: TaskTransition =
+        a.state === "open" && b.state === "completed" ? "completed" : "reopened";
+      statusChanges.push({
+        subject: stripTaskMarker(b.raw) || stripTaskMarker(a.raw),
+        transition,
+        beforeState: a.state,
+        afterState: b.state,
+        beforeRaw: a.raw,
+        afterRaw: b.raw,
+      });
+      continue;
+    }
+
+    if (b && !a) {
+      const transition: TaskTransition =
+        b.state === "completed" ? "added-completed" : "added-open";
+      statusChanges.push({
+        subject: stripTaskMarker(b.raw),
+        transition,
+        beforeState: null,
+        afterState: b.state,
+        beforeRaw: null,
+        afterRaw: b.raw,
+      });
+      added.push(b.raw);
+      continue;
+    }
+
+    if (a && !b) {
+      const transition: TaskTransition =
+        a.state === "completed" ? "removed-completed" : "removed-open";
+      statusChanges.push({
+        subject: stripTaskMarker(a.raw),
+        transition,
+        beforeState: a.state,
+        afterState: null,
+        beforeRaw: a.raw,
+        afterRaw: null,
+      });
+      removed.push(a.raw);
+    }
+  }
+
+  return { statusChanges, added, removed };
+}
+
+function indexTasks(items: string[]): Map<string, { state: TaskState; raw: string }> {
+  const m = new Map<string, { state: TaskState; raw: string }>();
+  for (const raw of items) {
+    const key = taskKey(raw);
+    if (!key) continue;
+    // First occurrence wins. Duplicate identical tasks within one side
+    // would otherwise inflate change counts.
+    if (!m.has(key)) m.set(key, { state: detectTaskState(raw), raw });
+  }
+  return m;
+}
+
+/**
+ * Identity key for a task — its body, normalised. Strips the checkbox
+ * marker, the `TODO:` prefix, leading list bullets, and lowercases /
+ * collapses whitespace. Two tasks with the same body but different
+ * checkbox states share the same key.
+ */
+function taskKey(raw: string): string {
+  return raw
+    .replace(/^\s*[-*\u2022]\s*/, "")            // leading list bullet
+    .replace(/^\[[ xX]\]\s*/, "")               // checkbox marker
+    .replace(/^todo\s*[:\-\u2014]?\s*/i, "")     // TODO prefix
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Display-friendly version of the task body — preserves original casing
+ * but strips the marker. Used as the `subject` field on the resulting
+ * TaskStatusChange so renderers can say "Task completed: Write
+ * integration tests for auth flow" verbatim.
+ */
+function stripTaskMarker(raw: string): string {
+  return raw
+    .replace(/^\s*[-*\u2022]\s*/, "")
+    .replace(/^\[[ xX]\]\s*/, "")
+    .replace(/^todo\s*[:\-\u2014]?\s*/i, "")
+    .trim();
+}
+
+/**
+ * Read the task's state from its raw form. `[x]` / `[X]` is completed;
+ * `[ ]` and bare `TODO: ...` (no checkbox) are both open. The latter is
+ * intentional — a bare TODO is a thing-to-do, semantically open.
+ */
+function detectTaskState(raw: string): TaskState {
+  if (/^\s*[-*\u2022]?\s*\[[xX]\]/.test(raw)) return "completed";
+  return "open";
 }
 
 export function detectChangedCommitments(pairs: MatchedPair[]): CommitmentEvidence[] {
@@ -669,6 +798,7 @@ export function buildSummary(parts: {
   changedCommitments: string[];
   actionItemsAdded: string[];
   actionItemsRemoved: string[];
+  actionItemsStatusChanges?: TaskStatusChange[];
   possibleContradictions: string[];
 }): string {
   const highlights: string[] = [];
@@ -686,7 +816,12 @@ export function buildSummary(parts: {
     highlights.push(`${conceptCount} concept delta${plural(conceptCount)}`);
   }
 
-  const actionCount = parts.actionItemsAdded.length + parts.actionItemsRemoved.length;
+  // Action-item count: prefer the richer status-change list when present
+  // (it covers toggles too); otherwise fall back to the legacy add+remove
+  // count for old callers / golden fixtures that don't pass status changes.
+  const actionCount = parts.actionItemsStatusChanges
+    ? parts.actionItemsStatusChanges.length
+    : parts.actionItemsAdded.length + parts.actionItemsRemoved.length;
   if (actionCount > 0) {
     highlights.push(`${actionCount} action-item change${plural(actionCount)}`);
   }

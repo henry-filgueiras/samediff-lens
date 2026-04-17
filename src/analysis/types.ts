@@ -76,6 +76,35 @@ export type ActionItemProvenance = {
   provenance?: FindingProvenance;
 };
 
+// ── Checklist semantics ─────────────────────────────────────────────
+// Markdown checklists are a structured mini-language. Treating
+// `[ ]` and `[x]` as opaque strings makes a completion read as a
+// task removal *and* a different task addition, which is wrong.
+// `compareActionItems` normalises the body and emits a richer
+// TaskStatusChange whose transition is the human-readable signal.
+
+export type TaskState = "open" | "completed";
+
+export type TaskTransition =
+  | "completed"           // [ ] → [x]
+  | "reopened"            // [x] → [ ]
+  | "added-open"          // absent → [ ]
+  | "added-completed"     // absent → [x]
+  | "removed-open"        // [ ] → absent
+  | "removed-completed";  // [x] → absent
+
+export type TaskStatusChange = {
+  /** Body of the task with checkbox / TODO marker stripped. */
+  subject: string;
+  transition: TaskTransition;
+  beforeState: TaskState | null;
+  afterState: TaskState | null;
+  /** Original raw line from each side (when present). */
+  beforeRaw: string | null;
+  afterRaw: string | null;
+  provenance?: FindingProvenance;
+};
+
 export type AnalysisResult = {
   addedConcepts: string[];
   removedConcepts: string[];
@@ -83,6 +112,14 @@ export type AnalysisResult = {
   changedCommitments: string[];
   actionItemsAdded: string[];
   actionItemsRemoved: string[];
+  /**
+   * First-class checklist transitions. Includes simple add/remove cases
+   * (absent ↔ [ ] / [x]) AND the toggle cases ([ ] ↔ [x]) that
+   * `actionItemsAdded` / `actionItemsRemoved` cannot represent. Toggle
+   * cases are NOT mirrored back into the add/remove buckets — a
+   * completion is a status change, not an add+remove pair.
+   */
+  actionItemsStatusChanges: TaskStatusChange[];
   possibleContradictions: string[];
   addedConceptsEvidence: ConceptEvidence[];
   removedConceptsEvidence: ConceptEvidence[];

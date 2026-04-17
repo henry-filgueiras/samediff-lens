@@ -19,7 +19,7 @@ import type {
   ContradictionFinding,
   ConceptFinding,
   ConceptRenameFinding,
-  ActionItemFinding,
+  TaskStatusChangeFinding,
 } from "../../cli/resultModel";
 import type { SourceAnchor } from "../types";
 import type { IssueKind, FindingRef, Confidence } from "./types";
@@ -33,6 +33,14 @@ export type ClassifiedFinding = {
   triggers: string[];
   anchors: SourceAnchor[];
   confidence: Confidence;
+  /**
+   * Optional payload for kinds that need extra context the title
+   * template can't reconstruct from before/after alone — currently only
+   * task transitions, where we want the human-readable subject and the
+   * specific transition tag.
+   */
+  taskTransition?: TaskStatusChangeFinding["transition"];
+  taskSubject?: string;
 };
 
 export function classifyAll(diff: DiffResult): ClassifiedFinding[] {
@@ -43,8 +51,17 @@ export function classifyAll(diff: DiffResult): ClassifiedFinding[] {
   diff.findings.conceptRenames.forEach((f, i) => out.push(classifyRename(f, i)));
   diff.findings.addedConcepts.forEach((f, i) => out.push(classifyAdded(f, i)));
   diff.findings.removedConcepts.forEach((f, i) => out.push(classifyRemoved(f, i)));
-  diff.findings.actionItemsAdded.forEach((f, i) => out.push(classifyActionAdded(f, i)));
-  diff.findings.actionItemsRemoved.forEach((f, i) => out.push(classifyActionRemoved(f, i)));
+
+  // Task status changes are the first-class signal for checklist drift.
+  // We deliberately ignore the legacy actionItemsAdded / actionItemsRemoved
+  // buckets here — they would double-emit issues for the simple add/remove
+  // cases (which the status-change finding already covers via the
+  // `added-*` / `removed-*` transitions). Those buckets remain populated
+  // in the DiffResult for backward-compat with renderers and consumers
+  // that still want flat string lists.
+  (diff.findings.actionItemsStatusChanges ?? []).forEach((f, i) =>
+    out.push(classifyTaskStatusChange(f, i)),
+  );
 
   return out;
 }
@@ -171,26 +188,37 @@ function classifyRemoved(f: ConceptFinding, index: number): ClassifiedFinding {
   };
 }
 
-function classifyActionAdded(f: ActionItemFinding, index: number): ClassifiedFinding {
+/**
+ * Map a TaskStatusChangeFinding's transition tag onto an IssueKind.
+ *   completed / reopened   → first-class strong individual signal
+ *   added-* / removed-*    → task-scope-shift (churn)
+ *
+ * The transition tag and verbatim subject are stashed on the
+ * ClassifiedFinding so buildIssue can emit the precise title.
+ */
+function classifyTaskStatusChange(
+  f: TaskStatusChangeFinding,
+  index: number,
+): ClassifiedFinding {
+  let kind: IssueKind;
+  switch (f.transition) {
+    case "completed":         kind = "task-completed"; break;
+    case "reopened":          kind = "task-reopened"; break;
+    case "added-open":
+    case "added-completed":
+    case "removed-open":
+    case "removed-completed": kind = "task-scope-shift"; break;
+  }
   return {
-    ref: { category: "action-item-added", index },
-    kind: "task-scope-shift",
-    before: null,
-    after: f.description,
-    triggers: ["action-added"],
+    ref: { category: "task-status-change", index },
+    kind,
+    before: f.evidence.before,
+    after: f.evidence.after,
+    triggers: [`task-transition:${f.transition}`],
     anchors: f.provenance?.anchors ?? [],
     confidence: "medium",
+    taskTransition: f.transition,
+    taskSubject: f.subject,
   };
 }
 
-function classifyActionRemoved(f: ActionItemFinding, index: number): ClassifiedFinding {
-  return {
-    ref: { category: "action-item-removed", index },
-    kind: "task-scope-shift",
-    before: f.description,
-    after: null,
-    triggers: ["action-removed"],
-    anchors: f.provenance?.anchors ?? [],
-    confidence: "medium",
-  };
-}

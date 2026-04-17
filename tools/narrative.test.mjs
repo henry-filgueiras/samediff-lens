@@ -78,6 +78,7 @@ test("every Issue cites at least one raw finding (anti-hallucination contract)",
           "removed-concept": "removedConcepts",
           "action-item-added": "actionItemsAdded",
           "action-item-removed": "actionItemsRemoved",
+          "task-status-change": "actionItemsStatusChanges",
         }[ref.category];
         assert.ok(bucketName, `unknown finding category ${ref.category}`);
         const bucket = r.findings[bucketName];
@@ -251,6 +252,174 @@ test("narrative quarantines weak contradictions whose before/after subjects disa
       }
     }
   }
+});
+
+// ── Regression: checklist state transitions ───────────────────────────────
+
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+
+function withTempPair(left, right, fn) {
+  const dir = mkdtempSync(resolve(tmpdir(), "samediff-task-"));
+  const lp = resolve(dir, "left.md");
+  const rp = resolve(dir, "right.md");
+  writeFileSync(lp, left, "utf-8");
+  writeFileSync(rp, right, "utf-8");
+  try {
+    return fn(lp, rp);
+  } finally {
+    rmSync(dir, { force: true, recursive: true });
+  }
+}
+
+test("checklist transition: [ ] -> [x] is a single 'completed' status change, not add+remove", () => {
+  const left = "# Tasks\n- [ ] Write integration tests for auth flow\n";
+  const right = "# Tasks\n- [x] Write integration tests for auth flow\n";
+  withTempPair(left, right, (lp, rp) => {
+    const r = runJson(lp, rp);
+
+    assert.equal(r.findings.actionItemsStatusChanges.length, 1, "expected exactly one status change");
+    const change = r.findings.actionItemsStatusChanges[0];
+    assert.equal(change.transition, "completed");
+    assert.equal(change.beforeState, "open");
+    assert.equal(change.afterState, "completed");
+    assert.equal(change.subject, "Write integration tests for auth flow");
+
+    // Toggle must NOT appear in the legacy add/remove buckets.
+    assert.equal(
+      r.findings.actionItemsAdded.length, 0,
+      "completion must not appear in actionItemsAdded",
+    );
+    assert.equal(
+      r.findings.actionItemsRemoved.length, 0,
+      "completion must not appear in actionItemsRemoved",
+    );
+
+    // Narrative headline must read as completion, not as churn.
+    assert.equal(r.narrative.headline, "Task completed: Write integration tests for auth flow");
+    assert.equal(r.narrative.issues.length, 1);
+    assert.equal(r.narrative.issues[0].kind, "task-completed");
+  });
+});
+
+test("checklist transition: [x] -> [ ] is a 'reopened' status change, not add+remove", () => {
+  const left = "# Tasks\n- [x] Deploy to staging\n";
+  const right = "# Tasks\n- [ ] Deploy to staging\n";
+  withTempPair(left, right, (lp, rp) => {
+    const r = runJson(lp, rp);
+    assert.equal(r.findings.actionItemsStatusChanges.length, 1);
+    const change = r.findings.actionItemsStatusChanges[0];
+    assert.equal(change.transition, "reopened");
+    assert.equal(change.beforeState, "completed");
+    assert.equal(change.afterState, "open");
+    assert.equal(change.subject, "Deploy to staging");
+    assert.equal(r.findings.actionItemsAdded.length, 0);
+    assert.equal(r.findings.actionItemsRemoved.length, 0);
+    assert.equal(r.narrative.headline, "Task reopened: Deploy to staging");
+    assert.equal(r.narrative.issues[0].kind, "task-reopened");
+  });
+});
+
+test("checklist transition: absent -> [ ] is 'added-open'", () => {
+  const left = "# Tasks\n";
+  const right = "# Tasks\n- [ ] Wire up the linter\n";
+  withTempPair(left, right, (lp, rp) => {
+    const r = runJson(lp, rp);
+    const change = r.findings.actionItemsStatusChanges.find((c) => c.subject === "Wire up the linter");
+    assert.ok(change, "expected status change for new task");
+    assert.equal(change.transition, "added-open");
+    assert.equal(change.beforeState, null);
+    assert.equal(change.afterState, "open");
+    // Backward-compat: simple adds DO still show up in legacy bucket
+    assert.ok(
+      r.findings.actionItemsAdded.some((a) => /Wire up the linter/.test(a.description)),
+      "added-open should still appear in legacy actionItemsAdded for compat",
+    );
+  });
+});
+
+test("checklist transition: [ ] -> absent is 'removed-open'", () => {
+  const left = "# Tasks\n- [ ] Decommission old dashboard\n";
+  const right = "# Tasks\n";
+  withTempPair(left, right, (lp, rp) => {
+    const r = runJson(lp, rp);
+    const change = r.findings.actionItemsStatusChanges.find(
+      (c) => c.subject === "Decommission old dashboard",
+    );
+    assert.ok(change);
+    assert.equal(change.transition, "removed-open");
+    assert.equal(change.beforeState, "open");
+    assert.equal(change.afterState, null);
+    assert.ok(
+      r.findings.actionItemsRemoved.some((a) => /Decommission old dashboard/.test(a.description)),
+      "removed-open should still appear in legacy actionItemsRemoved for compat",
+    );
+  });
+});
+
+test("checklist transition: absent -> [x] is 'added-completed'", () => {
+  const left = "# Tasks\n";
+  const right = "# Tasks\n- [x] Backfill audit logs\n";
+  withTempPair(left, right, (lp, rp) => {
+    const r = runJson(lp, rp);
+    const change = r.findings.actionItemsStatusChanges.find(
+      (c) => c.subject === "Backfill audit logs",
+    );
+    assert.ok(change);
+    assert.equal(change.transition, "added-completed");
+    assert.equal(change.beforeState, null);
+    assert.equal(change.afterState, "completed");
+    const titles = [...r.narrative.issues, ...r.narrative.quiet].map((i) => i.title);
+    assert.ok(
+      titles.some((t) => t === "Task added (already completed): Backfill audit logs"),
+      `expected "Task added (already completed): ..." title; got ${titles.join(" | ")}`,
+    );
+  });
+});
+
+test("checklist transition: [x] -> absent is 'removed-completed'", () => {
+  const left = "# Tasks\n- [x] Migrate to TLS 1.3\n";
+  const right = "# Tasks\n";
+  withTempPair(left, right, (lp, rp) => {
+    const r = runJson(lp, rp);
+    const change = r.findings.actionItemsStatusChanges.find(
+      (c) => c.subject === "Migrate to TLS 1.3",
+    );
+    assert.ok(change);
+    assert.equal(change.transition, "removed-completed");
+    assert.equal(change.beforeState, "completed");
+    assert.equal(change.afterState, null);
+    const titles = [...r.narrative.issues, ...r.narrative.quiet].map((i) => i.title);
+    assert.ok(
+      titles.some((t) => t === "Completed task removed: Migrate to TLS 1.3"),
+      `expected "Completed task removed: ..." title; got ${titles.join(" | ")}`,
+    );
+  });
+});
+
+test("checklist: identical state on both sides produces no status change", () => {
+  const left = "# Tasks\n- [ ] Foo\n- [x] Bar\n";
+  const right = "# Tasks\n- [ ] Foo\n- [x] Bar\n";
+  withTempPair(left, right, (lp, rp) => {
+    const r = runJson(lp, rp);
+    assert.equal(r.findings.actionItemsStatusChanges.length, 0);
+    assert.equal(r.findings.actionItemsAdded.length, 0);
+    assert.equal(r.findings.actionItemsRemoved.length, 0);
+  });
+});
+
+test("checklist: TODO without checkbox is treated as open (matches across syntactic forms)", () => {
+  // Bare `TODO: foo` is open; `[x] foo` is completed. Same body → completion.
+  const left = "# Tasks\n- TODO: Wire up the dashboard\n";
+  const right = "# Tasks\n- [x] Wire up the dashboard\n";
+  withTempPair(left, right, (lp, rp) => {
+    const r = runJson(lp, rp);
+    assert.equal(r.findings.actionItemsStatusChanges.length, 1);
+    const change = r.findings.actionItemsStatusChanges[0];
+    assert.equal(change.transition, "completed");
+    assert.equal(change.subject, "Wire up the dashboard");
+    assert.equal(r.narrative.headline, "Task completed: Wire up the dashboard");
+  });
 });
 
 test("--no-narrative omits the narrative field from --json", () => {

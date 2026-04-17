@@ -357,6 +357,7 @@ test("empty versus empty returns a safe empty result", () => {
     changedCommitments: [],
     actionItemsAdded: [],
     actionItemsRemoved: [],
+    actionItemsStatusChanges: [],
     possibleContradictions: [],
     addedConceptsEvidence: [],
     removedConceptsEvidence: [],

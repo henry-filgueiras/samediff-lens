@@ -25,6 +25,7 @@ import {
   titleConstraintIntroduced,
   titleScopeNarrowed,
   titleTaskShift,
+  titleTaskTransition,
   titleRename,
 } from "./templates";
 
@@ -36,6 +37,10 @@ const KIND_WEIGHT: Record<IssueKind, number> = {
   "commitment-strengthening": 5,
   "commitment-weakening": 5,
   "scope-narrowed": 5,
+  // Reopen is slightly louder than completion: it signals work that was
+  // previously closed got un-closed, which is usually a regression.
+  "task-reopened": 4,
+  "task-completed": 4,
   "rename": 2,
   "task-scope-shift": 2,
   "observation": 1,
@@ -87,8 +92,12 @@ export function buildNarrative(diff: DiffResult): NarrativeReport {
     }
   }
 
+  // Headline = top[0].title for any strong individual signal. Only fall
+  // back to the meta-synthesis "Checklist churn: N added, M removed" when
+  // top contains nothing but pure add/remove churn (task-scope-shift),
+  // which only happens via the empty-top hoist above.
   const headline = top.length > 0
-    ? (allTasks(top)
+    ? (allChurn(top)
         ? synthesizeTaskHeadline(top, quiet)
         : top[0].title)
     : null;
@@ -101,7 +110,7 @@ export function buildNarrative(diff: DiffResult): NarrativeReport {
   };
 }
 
-function allTasks(issues: Issue[]): boolean {
+function allChurn(issues: Issue[]): boolean {
   return issues.length > 0 && issues.every((i) => i.kind === "task-scope-shift");
 }
 
@@ -127,17 +136,24 @@ function isWeakContradiction(issue: Issue): boolean {
 }
 
 function synthesizeTaskHeadline(top: Issue[], quiet: Issue[]): string {
-  // Count added vs removed across top + quiet. Titles start with
-  // "Task added:" / "Task removed:" (built by titleTaskShift) so this is
-  // a text check, no extra state needed.
+  // Count by transition tag from triggers. Triggers carry
+  // `task-transition:<transition>` (set by classifyTaskStatusChange).
   let added = 0;
   let removed = 0;
+  let completed = 0;
+  let reopened = 0;
   for (const i of [...top, ...quiet]) {
-    if (i.kind !== "task-scope-shift") continue;
-    if (i.title.startsWith("Task added:")) added++;
-    else if (i.title.startsWith("Task removed:")) removed++;
+    const transTrig = i.evidence.triggers.find((t) => t.startsWith("task-transition:"));
+    if (!transTrig) continue;
+    const trans = transTrig.slice("task-transition:".length);
+    if (trans.startsWith("added")) added++;
+    else if (trans.startsWith("removed")) removed++;
+    else if (trans === "completed") completed++;
+    else if (trans === "reopened") reopened++;
   }
   const parts: string[] = [];
+  if (completed > 0) parts.push(`${completed} completed`);
+  if (reopened > 0) parts.push(`${reopened} reopened`);
   if (added > 0) parts.push(`${added} added`);
   if (removed > 0) parts.push(`${removed} removed`);
   return `Checklist churn: ${parts.join(", ") || `${top.length + quiet.length} task changes`}`;
@@ -169,9 +185,21 @@ function buildIssue(c: Cluster, index: number): Issue {
       title = titleConstraintIntroduced(primary.before, after || before); break;
     case "scope-narrowed":
       title = titleScopeNarrowed(before, after); break;
+    case "task-completed":
+    case "task-reopened":
     case "task-scope-shift": {
-      const added = primary.triggers[0] === "action-added";
-      title = titleTaskShift(added, (added ? after : before) || "");
+      // The classify pass stashes the precise transition + clean
+      // subject (marker-stripped) on the ClassifiedFinding. Use them
+      // verbatim so the title reads as a state-change accusation.
+      if (primary.taskTransition && primary.taskSubject) {
+        title = titleTaskTransition(primary.taskTransition, primary.taskSubject);
+      } else {
+        // Defensive fallback for any path that didn't go through
+        // classifyTaskStatusChange (shouldn't happen, but keeps the
+        // contract: every Issue has a non-empty title).
+        const added = !!primary.after && !primary.before;
+        title = titleTaskShift(added, (added ? after : before) || "");
+      }
       break;
     }
     case "rename":
@@ -234,6 +262,10 @@ function buildLede(
       return `A commitment${s} was strengthened — modal escalation${n}.`;
     case "commitment-weakening":
       return `A commitment${s} was softened${n}.`;
+    case "task-completed":
+      return "A previously-open task was checked off.";
+    case "task-reopened":
+      return "A previously-completed task was un-checked.";
     case "task-scope-shift":
       return after ? "A task was added." : "A task was removed.";
     case "rename":

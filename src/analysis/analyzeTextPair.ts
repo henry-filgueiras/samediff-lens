@@ -1,4 +1,8 @@
-import type { ActionItemProvenance, AnalysisResult } from "./types";
+import type {
+  ActionItemProvenance,
+  AnalysisResult,
+  TaskStatusChange,
+} from "./types";
 import {
   buildSummary,
   compareActionItems,
@@ -30,6 +34,7 @@ export function analyzeTextPair(versionA: string, versionB: string): AnalysisRes
       changedCommitments: [],
       actionItemsAdded: [],
       actionItemsRemoved: [],
+      actionItemsStatusChanges: [],
       possibleContradictions: [],
       addedConceptsEvidence: [],
       removedConceptsEvidence: [],
@@ -83,6 +88,7 @@ export function analyzeTextPair(versionA: string, versionB: string): AnalysisRes
     changedCommitments: changedCommitmentsEvidence.map((item) => item.summary),
     actionItemsAdded: actionDiff.added,
     actionItemsRemoved: actionDiff.removed,
+    actionItemsStatusChanges: actionDiff.statusChanges,
     possibleContradictions: possibleContradictionsEvidence.map((item) => item.summary),
     addedConceptsEvidence,
     removedConceptsEvidence,
@@ -156,4 +162,24 @@ function enrichProvenance(result: AnalysisResult, ctx: ProvenanceContext): void 
       return prov ? { description, provenance: prov } : { description };
     },
   );
+
+  // Task status changes: anchor on whichever side(s) the raw line exists.
+  // Toggles get dual anchors; pure adds/removes get one side.
+  for (const change of result.actionItemsStatusChanges) {
+    const p = anchorTaskStatusChange(ctx, change);
+    if (p) change.provenance = p;
+  }
+}
+
+function anchorTaskStatusChange(ctx: ProvenanceContext, change: TaskStatusChange) {
+  if (change.beforeRaw && change.afterRaw) {
+    return anchorBothSides(ctx, change.beforeRaw, change.afterRaw);
+  }
+  if (change.afterRaw) {
+    return anchorOnSide(ctx, "after", change.afterRaw);
+  }
+  if (change.beforeRaw) {
+    return anchorOnSide(ctx, "before", change.beforeRaw);
+  }
+  return null;
 }

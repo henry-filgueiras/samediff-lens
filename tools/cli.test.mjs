@@ -283,6 +283,10 @@ test("--json counts match findings array lengths", () => {
   assert.equal(result.counts.removedConcepts, result.findings.removedConcepts.length);
   assert.equal(result.counts.actionItemsAdded, result.findings.actionItemsAdded.length);
   assert.equal(result.counts.actionItemsRemoved, result.findings.actionItemsRemoved.length);
+  assert.equal(
+    result.counts.actionItemsStatusChanges,
+    result.findings.actionItemsStatusChanges.length,
+  );
 
   const computedTotal =
     result.counts.commitmentShifts +
@@ -291,7 +295,8 @@ test("--json counts match findings array lengths", () => {
     result.counts.addedConcepts +
     result.counts.removedConcepts +
     result.counts.actionItemsAdded +
-    result.counts.actionItemsRemoved;
+    result.counts.actionItemsRemoved +
+    result.counts.actionItemsStatusChanges;
   assert.equal(result.counts.total, computedTotal, "Total should equal sum of category counts");
 });
 
@@ -668,16 +673,16 @@ test("--json schema shape is stable (snapshot fields)", () => {
   // Verify counts keys
   const countsKeys = Object.keys(result.counts).sort();
   assert.deepEqual(countsKeys, [
-    "actionItemsAdded", "actionItemsRemoved", "addedConcepts",
-    "commitmentShifts", "conceptRenames", "contradictions",
+    "actionItemsAdded", "actionItemsRemoved", "actionItemsStatusChanges",
+    "addedConcepts", "commitmentShifts", "conceptRenames", "contradictions",
     "removedConcepts", "total",
   ]);
 
   // Verify findings keys
   const findingsKeys = Object.keys(result.findings).sort();
   assert.deepEqual(findingsKeys, [
-    "actionItemsAdded", "actionItemsRemoved", "addedConcepts",
-    "commitmentShifts", "conceptRenames", "contradictions",
+    "actionItemsAdded", "actionItemsRemoved", "actionItemsStatusChanges",
+    "addedConcepts", "commitmentShifts", "conceptRenames", "contradictions",
     "removedConcepts",
   ]);
 });

@@ -1,4 +1,4 @@
-import type { AnalysisResult } from "../analysis/types";
+import type { AnalysisResult, TaskStatusChange } from "../analysis/types";
 import { computeDriftScore } from "./scoring";
 import { describeContradiction, NO_PRIOR_LINE_TEXT } from "../analysis/heuristics";
 import { buildNarrative } from "../analysis/narrative";
@@ -74,8 +74,15 @@ export function formatHtmlReport(
     sections.push(card("Commitment Shifts", "commitment", result.changedCommitmentsEvidence.length, items));
   }
 
-  // Task drift
-  if (result.actionItemsAdded.length > 0 || result.actionItemsRemoved.length > 0) {
+  // Task drift — render the rich status-change view when available, so
+  // a [ ] → [x] toggle reads as "completed" instead of an add+remove
+  // pair. Falls back to the legacy add/remove buckets for callers that
+  // don't populate status changes.
+  const statusChanges = result.actionItemsStatusChanges ?? [];
+  if (statusChanges.length > 0) {
+    const items = statusChanges.map((c) => renderTaskStatusChange(c)).join("");
+    sections.push(card("Task Drift", "task", statusChanges.length, items));
+  } else if (result.actionItemsAdded.length > 0 || result.actionItemsRemoved.length > 0) {
     const items = [
       ...result.actionItemsAdded.map((i) => `<div class="ev-added">+ ${esc(truncate(i, 90))}</div>`),
       ...result.actionItemsRemoved.map((i) => `<div class="ev-removed">- ${esc(truncate(i, 90))}</div>`),
@@ -515,6 +522,28 @@ function renderIssue(issue: Issue): string {
         </details>
       </div>
     </div>`;
+}
+
+function renderTaskStatusChange(c: TaskStatusChange): string {
+  const verb = (() => {
+    switch (c.transition) {
+      case "completed":         return "completed";
+      case "reopened":          return "reopened";
+      case "added-open":        return "added (open)";
+      case "added-completed":   return "added (already completed)";
+      case "removed-open":      return "removed (was open)";
+      case "removed-completed": return "removed (was completed)";
+    }
+  })();
+  const cls =
+    c.transition === "completed" ? "ev-added" :
+    c.transition === "reopened" ? "ev-removed" :
+    c.transition.startsWith("added") ? "ev-added" :
+    "ev-removed";
+  return `
+      <div class="evidence-card">
+        <div class="${cls}">${esc(verb)} \u2014 ${esc(truncate(c.subject, 110))}</div>
+      </div>`;
 }
 
 function renderQuietItem(issue: Issue): string {

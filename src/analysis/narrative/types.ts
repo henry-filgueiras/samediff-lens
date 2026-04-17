@@ -25,7 +25,9 @@ export type IssueKind =
   | "commitment-strengthening"  // should → must
   | "commitment-weakening"      // must → should
   | "scope-narrowed"            // limiting language added (only/except/just)
-  | "task-scope-shift"          // action item churn
+  | "task-completed"            // [ ] → [x]
+  | "task-reopened"             // [x] → [ ]
+  | "task-scope-shift"          // pure add/remove of an action item
   | "rename"                    // concept rename
   | "observation";              // catch-all below-the-fold bucket
 
@@ -36,7 +38,8 @@ export type FindingCategory =
   | "added-concept"
   | "removed-concept"
   | "action-item-added"
-  | "action-item-removed";
+  | "action-item-removed"
+  | "task-status-change";
 
 /** Pointer back into DiffResult.findings[<category>][<index>]. */
 export type FindingRef = {

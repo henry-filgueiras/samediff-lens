@@ -61,9 +61,96 @@ The core analysis engine in `src/analysis/` is shared between both surfaces. It 
 **Example spectrum (examples/):**
 01-modal-shift → 02-todo-drift → 03-api-contract → 04-prompt-policy → 05-hydra-doc-drift
 
-**Test counts:** 28 engine tests + 100 CLI integration tests + 24 PR-reviewer tests + 11 narrative tests, all passing
+**Test counts:** 28 engine tests + 100 CLI integration tests + 24 PR-reviewer tests + 19 narrative tests, all passing
 
 ## Devlog
+
+### 2026-04-17 — Claude Opus 4.7 — Checklist semantics: status changes, not add+remove
+
+Markdown checklists (`- [ ]` / `- [x]`) are a structured mini-language.
+The engine had been treating them as opaque strings, so `[ ] Foo` →
+`[x] Foo` read at the diff level as "task removed + different task
+added". A human reads it as "task completed". This was a semantic bug,
+not a presentation bug — and the user explicitly wanted it fixed
+upstream in the engine, not patched in narrative rendering.
+
+**Engine change.** `compareActionItems` now first builds a
+normalised-body index (`taskKey`) per side that strips checkbox
+markers (`[ ]` / `[x]` / `[X]`), the `TODO:` prefix, and leading list
+bullets. State (`open` / `completed`) is read separately by
+`detectTaskState`. With body as identity and checkbox as state, the
+six possible transitions become first-class:
+
+```
+[ ] → [x]         completed
+[x] → [ ]         reopened
+absent → [ ]      added-open
+absent → [x]      added-completed
+[ ] → absent      removed-open
+[x] → absent      removed-completed
+```
+
+These are emitted as `actionItemsStatusChanges: TaskStatusChange[]` —
+the new primary signal for checklist drift. The existing
+`actionItemsAdded` / `actionItemsRemoved` string buckets are **still
+populated for backward-compat**, but only with the simple add/remove
+cases. **Toggle cases never appear there** — that's the whole point:
+a checkbox flip is one event, not an add+remove pair.
+
+Bare `TODO: foo` (no checkbox) is treated as open, so `TODO: Wire up
+the dashboard` → `[x] Wire up the dashboard` correctly emits a
+`completed` transition.
+
+**DiffResult / scoring.** `findings.actionItemsStatusChanges` is a new
+finding category with `transition`, `beforeState`, `afterState`,
+`subject` (marker-stripped), and dual-side anchors. `counts` gains the
+new field; `total` includes it. Scoring switches the action-item
+contribution to use the status-change count when present (1 toggle = 1
+event) and falls back to add+remove for legacy callers — avoids
+double-counting the simple cases that appear in both places.
+
+**Narrative.** Two new IssueKinds — `task-completed` and
+`task-reopened` (weight 4 each, above the rename/churn baseline). The
+narrative classifier now consumes only `actionItemsStatusChanges` for
+task signals (skipping the legacy add/remove findings to avoid
+duplicate issues). New `titleTaskTransition` template emits the
+human-readable accusation per transition: "Task completed: …",
+"Task reopened: …", "Task added (already completed): …",
+"Completed task removed: …". The pure add/remove case still routes to
+`task-scope-shift` so the existing churn-bucket behaviour is unchanged.
+
+**Headline picker.** `synthesizeTaskHeadline` (the meta "Checklist
+churn: N added, M removed" fallback) now reads transition tags from
+trigger annotations and counts completed/reopened as well. Fallback
+only fires when top consists of pure add/remove churn — a single
+`task-completed` issue uses its own punchy title as the headline.
+
+**HTML renderer.** Task Drift card prefers the rich status-change view
+when available, with verb-tagged labels ("completed — Write integration
+tests for auth flow"). Falls back to the legacy add/remove rendering
+otherwise.
+
+**Anti-hallucination contract.** The `subject` field on
+`TaskStatusChange` is the original task body verbatim with marker
+stripped — no synthesis. Templates fill the `{subject}` slot from this
+field; if the engine couldn't extract a subject, the template falls
+back to the raw form. Every narrative Issue still cites at least one
+finding (now potentially a `task-status-change` ref), enforced by the
+existing anti-hallucination test.
+
+**Regression coverage.** Eight new tests in `tools/narrative.test.mjs`
+cover all six transitions independently, the no-op same-state case,
+and the bare-TODO matching case. The flagship test asserts that
+`[ ] → [x]` produces exactly one `completed` status change, that
+`actionItemsAdded` and `actionItemsRemoved` are both empty (the toggle
+must not leak into legacy buckets), and that the narrative headline
+reads "Task completed: Write integration tests for auth flow"
+verbatim.
+
+**Splash impact.** Example 02's splash card now reads "Task completed:
+Write integration tests for auth flow" instead of the previous
+"Checklist churn: 4 added, 2 removed". The latter is still synthesised
+as a fallback when no completion is present.
 
 ### 2026-04-17 — Claude Opus 4.7 — Cross-section contradiction guard
 

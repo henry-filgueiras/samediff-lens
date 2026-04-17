@@ -123,6 +123,31 @@ export function titleTaskShift(added: boolean, desc: string): string {
   return added ? `Task added: ${shortPhrase(desc, 85)}` : `Task removed: ${shortPhrase(desc, 85)}`;
 }
 
+/**
+ * Title for the six checklist transitions. Subject is the task body
+ * verbatim (markers already stripped by the engine).
+ */
+export function titleTaskTransition(
+  transition:
+    | "completed"
+    | "reopened"
+    | "added-open"
+    | "added-completed"
+    | "removed-open"
+    | "removed-completed",
+  subject: string,
+): string {
+  const s = shortPhrase(subject, 100);
+  switch (transition) {
+    case "completed":          return `Task completed: ${s}`;
+    case "reopened":           return `Task reopened: ${s}`;
+    case "added-open":         return `Task added: ${s}`;
+    case "added-completed":    return `Task added (already completed): ${s}`;
+    case "removed-open":       return `Task removed: ${s}`;
+    case "removed-completed":  return `Completed task removed: ${s}`;
+  }
+}
+
 export function titleRename(from: string, to: string): string {
   return `Concept renamed: ${shortPhrase(from, 40)} \u2192 ${shortPhrase(to, 40)}`;
 }

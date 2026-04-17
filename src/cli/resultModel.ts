@@ -18,6 +18,8 @@ import type {
   AnalysisResult,
   Confidence,
   FindingProvenance,
+  TaskState,
+  TaskTransition,
 } from "../analysis/types";
 import {
   describeContradiction,
@@ -82,6 +84,11 @@ export type FindingCounts = {
   removedConcepts: number;
   actionItemsAdded: number;
   actionItemsRemoved: number;
+  /**
+   * First-class checklist transitions. Counts every TaskStatusChange,
+   * including toggles (which never appear in actionItemsAdded/Removed).
+   */
+  actionItemsStatusChanges: number;
   total: number;
 };
 
@@ -93,6 +100,7 @@ export type Findings = {
   removedConcepts: ConceptFinding[];
   actionItemsAdded: ActionItemFinding[];
   actionItemsRemoved: ActionItemFinding[];
+  actionItemsStatusChanges: TaskStatusChangeFinding[];
 };
 
 export type CommitmentShiftFinding = {
@@ -165,6 +173,22 @@ export type ConceptFinding = {
 export type ActionItemFinding = {
   type: "action-item-added" | "action-item-removed";
   description: string;
+  provenance: FindingProvenance | null;
+};
+
+export type TaskStatusChangeFinding = {
+  type: "task-status-change";
+  /** Body of the task with checkbox / TODO marker stripped. */
+  subject: string;
+  transition: TaskTransition;
+  beforeState: TaskState | null;
+  afterState: TaskState | null;
+  evidence: {
+    /** Original raw line on the before side, or null if absent. */
+    before: string | null;
+    /** Original raw line on the after side, or null if absent. */
+    after: string | null;
+  };
   provenance: FindingProvenance | null;
 };
 
@@ -292,6 +316,20 @@ export function buildDiffResult(
       provenance: removedActionProv.get(desc) ?? null,
     }));
 
+  const actionItemsStatusChanges: TaskStatusChangeFinding[] =
+    (analysis.actionItemsStatusChanges ?? []).map((change) => ({
+      type: "task-status-change" as const,
+      subject: change.subject,
+      transition: change.transition,
+      beforeState: change.beforeState,
+      afterState: change.afterState,
+      evidence: {
+        before: change.beforeRaw,
+        after: change.afterRaw,
+      },
+      provenance: change.provenance ?? null,
+    }));
+
   const total =
     commitmentShifts.length +
     contradictions.length +
@@ -299,7 +337,8 @@ export function buildDiffResult(
     addedConcepts.length +
     removedConcepts.length +
     actionItemsAdded.length +
-    actionItemsRemoved.length;
+    actionItemsRemoved.length +
+    actionItemsStatusChanges.length;
 
   // Parse gitRef from labels if present (e.g., "HEAD~1:file.md")
   const parseGitInfo = (label: string) => {
@@ -346,6 +385,7 @@ export function buildDiffResult(
       removedConcepts: removedConcepts.length,
       actionItemsAdded: actionItemsAdded.length,
       actionItemsRemoved: actionItemsRemoved.length,
+      actionItemsStatusChanges: actionItemsStatusChanges.length,
       total,
     },
     findings: {
@@ -356,6 +396,7 @@ export function buildDiffResult(
       removedConcepts,
       actionItemsAdded,
       actionItemsRemoved,
+      actionItemsStatusChanges,
     },
     summary: analysis.summary,
   };
