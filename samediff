@@ -69,12 +69,11 @@ rebuild=0
 if [ ! -f dist-cli/cli/index.js ]; then
   rebuild=1
 else
-  for src in src/cli/*.ts src/analysis/*.ts src/lib/report.ts; do
-    if [ -e "$src" ] && [ "$src" -nt dist-cli/cli/index.js ]; then
-      rebuild=1
-      break
-    fi
-  done
+  # find (not glob) so nested analysis/**/*.ts picks up narrative/*, etc.
+  newest="$(find src/cli src/analysis -type f -name '*.ts' -newer dist-cli/cli/index.js -print -quit 2>/dev/null || true)"
+  if [ -n "$newest" ] || [ src/lib/report.ts -nt dist-cli/cli/index.js ]; then
+    rebuild=1
+  fi
 fi
 if [ "$rebuild" -eq 1 ]; then
   bash tools/build-cli.sh >&2

@@ -655,7 +655,7 @@ test("--json schema shape is stable (snapshot fields)", () => {
 
   // Verify the exact set of top-level keys
   const topKeys = Object.keys(result).sort();
-  assert.deepEqual(topKeys, ["counts", "findings", "input", "meta", "score", "summary", "version"]);
+  assert.deepEqual(topKeys, ["counts", "findings", "input", "meta", "narrative", "score", "summary", "version"]);
 
   // Verify meta keys
   const metaKeys = Object.keys(result.meta).sort();

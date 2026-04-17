@@ -1,11 +1,16 @@
 import type { AnalysisResult } from "../analysis/types";
 import { computeDriftScore } from "./scoring";
 import { describeContradiction, NO_PRIOR_LINE_TEXT } from "../analysis/heuristics";
+import { buildNarrative } from "../analysis/narrative";
+import type { Issue, NarrativeReport } from "../analysis/narrative";
+import { buildDiffResult } from "./resultModel";
 
 type HtmlOptions = {
   fileA?: string;
   fileB?: string;
   generatedAt?: string;
+  /** Render narrative Top Issues section above category cards. Default true. */
+  narrative?: boolean;
 };
 
 function esc(text: string): string {
@@ -44,6 +49,17 @@ export function formatHtmlReport(
   const score = computeDriftScore(result);
   const sev = severityClass(score);
   const sevLabel = severityLabel(score);
+
+  // Build narrative when requested (default on). The narrative is a pure
+  // view over the same analysis — it cites every underlying finding.
+  let narrative: NarrativeReport | null = null;
+  if (options.narrative !== false) {
+    const diff = buildDiffResult(result, {
+      labelA: options.fileA ?? "Version A",
+      labelB: options.fileB ?? "Version B",
+    });
+    narrative = buildNarrative(diff);
+  }
 
   const sections: string[] = [];
 
@@ -229,6 +245,111 @@ export function formatHtmlReport(
   .rename-arrow { color: var(--text2); }
   .rename-to { color: var(--cyan); }
 
+  /* Narrative — Top Issues */
+  .narrative-headline {
+    margin: 1.5rem 0 1rem; padding: 1rem 1.25rem;
+    background: var(--surface); border: 1px solid var(--border);
+    border-left: 3px solid var(--yellow); border-radius: 8px;
+  }
+  .narrative-headline.critical { border-left-color: var(--red); }
+  .narrative-headline.high { border-left-color: var(--red); }
+  .narrative-headline.moderate { border-left-color: var(--yellow); }
+  .narrative-headline.low { border-left-color: var(--green); }
+  .narrative-headline .kicker {
+    font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--text2); font-weight: 600; margin-bottom: 0.3rem;
+  }
+  .narrative-headline .headline-title {
+    font-size: 1.05rem; font-weight: 600; color: var(--text);
+    line-height: 1.45;
+  }
+  .issues-section { margin: 1.25rem 0 1rem; }
+  .issues-section-title {
+    font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--text2); font-weight: 600; margin-bottom: 0.5rem;
+    padding-left: 0.25rem;
+  }
+  .issue {
+    background: var(--surface); border: 1px solid var(--border);
+    border-left: 3px solid var(--border); border-radius: 8px;
+    padding: 0.85rem 1.1rem; margin-bottom: 0.65rem;
+  }
+  .issue.sev-critical { border-left-color: var(--red); }
+  .issue.sev-high { border-left-color: var(--red); }
+  .issue.sev-moderate { border-left-color: var(--yellow); }
+  .issue.sev-low { border-left-color: var(--green); }
+  .issue-title {
+    font-weight: 600; font-size: 0.95rem; color: var(--text);
+    line-height: 1.45; margin-bottom: 0.2rem;
+  }
+  .issue-lede {
+    font-size: 0.85rem; color: var(--text2); margin-bottom: 0.55rem;
+  }
+  .issue-badges {
+    display: flex; gap: 0.4rem; flex-wrap: wrap;
+    margin-bottom: 0.55rem; align-items: center;
+  }
+  .badge {
+    font-size: 0.72rem; padding: 0.1rem 0.5rem; border-radius: 10px;
+    background: var(--surface2); color: var(--text2);
+    text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600;
+  }
+  .badge.sev-critical { background: rgba(248,81,73,0.18); color: var(--red); }
+  .badge.sev-high     { background: rgba(248,81,73,0.15); color: var(--red); }
+  .badge.sev-moderate { background: var(--yellow-bg); color: var(--yellow); }
+  .badge.sev-low      { background: rgba(63,185,80,0.15); color: var(--green); }
+  .badge.kind         { background: var(--surface2); color: var(--blue); }
+  .issue-evidence {
+    border-top: 1px solid var(--border); margin-top: 0.55rem; padding-top: 0.55rem;
+    font-size: 0.85rem;
+  }
+  .issue-evidence details summary {
+    cursor: pointer; user-select: none; color: var(--text2);
+    font-size: 0.78rem; list-style: none;
+  }
+  .issue-evidence details summary::-webkit-details-marker { display: none; }
+  .issue-evidence details summary::before {
+    content: "\u25B8  "; display: inline-block; margin-right: 0.15rem;
+    transition: transform 0.15s ease;
+  }
+  .issue-evidence details[open] summary::before { content: "\u25BE  "; }
+  .issue-evidence details[open] summary { margin-bottom: 0.4rem; }
+  .issue-ev-row {
+    padding: 0.2rem 0; display: flex; gap: 0.5rem; align-items: baseline;
+  }
+  .issue-ev-label {
+    flex: 0 0 4.5rem; font-size: 0.7rem; text-transform: uppercase;
+    letter-spacing: 0.05em; color: var(--text2); font-weight: 600;
+  }
+  .issue-ev-before { color: var(--red); font-size: 0.88rem; }
+  .issue-ev-after { color: var(--green); font-size: 0.88rem; }
+  .issue-anchors {
+    margin-top: 0.35rem; font-size: 0.75rem; color: var(--text2);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .quiet-section { margin-top: 1rem; }
+  .quiet-list { padding-left: 0.25rem; }
+  .quiet-item {
+    padding: 0.35rem 0; border-bottom: 1px solid var(--border);
+    font-size: 0.85rem; color: var(--text2);
+  }
+  .quiet-item:last-child { border-bottom: none; }
+  .raw-details-wrapper {
+    margin-top: 1.5rem; padding-top: 1rem;
+    border-top: 1px solid var(--border);
+  }
+  .raw-details-wrapper > summary {
+    cursor: pointer; user-select: none;
+    font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--text2); font-weight: 600; margin-bottom: 0.75rem;
+    list-style: none;
+  }
+  .raw-details-wrapper > summary::-webkit-details-marker { display: none; }
+  .raw-details-wrapper > summary::before {
+    content: "\u25B8  "; display: inline-block;
+  }
+  .raw-details-wrapper[open] > summary::before { content: "\u25BE  "; }
+
   .summary {
     margin-top: 1.5rem; padding: 1rem; background: var(--surface);
     border: 1px solid var(--border); border-radius: 8px;
@@ -270,7 +391,12 @@ export function formatHtmlReport(
     </div>
   </div>
 
-  ${sections.join("\n")}
+  ${renderNarrative(narrative)}
+
+  ${sections.length > 0 ? `<details class="raw-details-wrapper"${narrative && narrative.issues.length > 0 ? "" : " open"}>
+    <summary>Supporting details &middot; raw findings by category</summary>
+    ${sections.join("\n")}
+  </details>` : ""}
 
   <div class="summary">${esc(result.summary)}</div>
 
@@ -301,4 +427,99 @@ function card(title: string, type: string, count: number, content: string): stri
     </div>
     <div class="card-body">${content}</div>
   </div>`;
+}
+
+function renderNarrative(n: NarrativeReport | null): string {
+  if (!n) return "";
+  if (!n.headline && n.issues.length === 0 && n.quiet.length === 0) return "";
+
+  const parts: string[] = [];
+
+  if (n.headline) {
+    parts.push(`
+  <div class="narrative-headline ${esc(n.severity)}">
+    <div class="kicker">Top finding</div>
+    <div class="headline-title">${esc(n.headline)}</div>
+  </div>`);
+  }
+
+  if (n.issues.length > 0) {
+    parts.push(`
+  <div class="issues-section">
+    <div class="issues-section-title">Top issues \u2014 ${n.issues.length}</div>
+    ${n.issues.map(renderIssue).join("")}
+  </div>`);
+  }
+
+  if (n.quiet.length > 0) {
+    parts.push(`
+  <div class="quiet-section">
+    <details>
+      <summary class="issues-section-title" style="cursor:pointer;">
+        Quiet diff \u2014 ${n.quiet.length} low-signal finding${n.quiet.length === 1 ? "" : "s"}
+      </summary>
+      <div class="quiet-list">
+        ${n.quiet.map(renderQuietItem).join("")}
+      </div>
+    </details>
+  </div>`);
+  }
+
+  return parts.join("\n");
+}
+
+function renderIssue(issue: Issue): string {
+  const sev = issue.severity;
+  const kindLabel = issue.kind.replace(/-/g, " ");
+  const anchors = issue.evidence.anchors.slice(0, 4).map((a) => {
+    const side = a.side === "before" ? "\u2190" : "\u2192";
+    const line = a.startLine != null ? `:${a.startLine}` : "";
+    return `${side}${line}`;
+  });
+
+  const evidenceRows: string[] = [];
+  if (issue.evidence.before) {
+    evidenceRows.push(`
+        <div class="issue-ev-row">
+          <span class="issue-ev-label">Before</span>
+          <span class="issue-ev-before">${esc(truncate(issue.evidence.before, 200))}</span>
+        </div>`);
+  }
+  if (issue.evidence.after) {
+    evidenceRows.push(`
+        <div class="issue-ev-row">
+          <span class="issue-ev-label">After</span>
+          <span class="issue-ev-after">${esc(truncate(issue.evidence.after, 200))}</span>
+        </div>`);
+  }
+  const triggerTags = issue.evidence.triggers.length > 0
+    ? `<div class="ev-tags" style="margin-top:0.4rem;">${issue.evidence.triggers.map((t) => `<span class="tag">${esc(t)}</span>`).join("")}</div>`
+    : "";
+
+  return `
+    <div class="issue sev-${esc(sev)}">
+      <div class="issue-title">${esc(issue.title)}</div>
+      <div class="issue-lede">${esc(issue.lede)}</div>
+      <div class="issue-badges">
+        <span class="badge sev-${esc(sev)}">${esc(sev)}</span>
+        <span class="badge kind">${esc(kindLabel)}</span>
+        <span class="badge">confidence: ${esc(issue.confidence)}</span>
+        <span class="badge">cites ${issue.supportingFindings.length} finding${issue.supportingFindings.length === 1 ? "" : "s"}</span>
+      </div>
+      <div class="issue-evidence">
+        <details>
+          <summary>Evidence</summary>
+          ${evidenceRows.join("")}
+          ${triggerTags}
+          ${anchors.length > 0 ? `<div class="issue-anchors">anchors: ${esc(anchors.join("  "))}</div>` : ""}
+        </details>
+      </div>
+    </div>`;
+}
+
+function renderQuietItem(issue: Issue): string {
+  return `
+      <div class="quiet-item">
+        <strong style="color:var(--text);">${esc(issue.title)}</strong>
+      </div>`;
 }

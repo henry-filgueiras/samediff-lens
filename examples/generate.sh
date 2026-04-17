@@ -66,6 +66,12 @@ html_escape() {
   .card-title { font-weight: 600; font-size: 1rem; }
   .card-slug { color: var(--text2); font-size: 0.8rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
   .card-difficulty { color: var(--text2); font-size: 0.85rem; }
+  .card-headline {
+    color: var(--text); font-size: 0.9rem; line-height: 1.4;
+    padding: 0.5rem 0.65rem; background: var(--surface2);
+    border-left: 2px solid var(--yellow); border-radius: 4px;
+    margin-top: 0.2rem;
+  }
   .card-score {
     display: flex; align-items: baseline; gap: 0.5rem; margin-top: auto; padding-top: 0.5rem;
   }
@@ -110,15 +116,23 @@ HEAD
         label_line="$(grep -m1 -oE '<div class="score-label">[^<]*</div>' "$findings")" || label_line=""
         score_label="$(printf '%s' "$label_line" | sed -E 's|<div class="score-label">([^<]*)</div>|\1|')"
 
+        # Narrative headline: the top-issue title that would make an engineer
+        # stop scrolling. Extracted verbatim from the generated HTML (so the
+        # splash stays in sync with whatever the narrative layer produced).
+        headline_line="$(grep -m1 -oE '<div class="headline-title">[^<]*</div>' "$findings")" || headline_line=""
+        headline="$(printf '%s' "$headline_line" | sed -E 's|<div class="headline-title">([^<]*)</div>|\1|')"
+
         esc_title="$(html_escape "$title")"
         esc_slug="$(html_escape "$slug")"
         esc_difficulty="$(html_escape "$difficulty")"
         esc_label="$(html_escape "$score_label")"
+        esc_headline="$(html_escape "$headline")"
 
         printf '  <a class="card" href="./%s/findings.html">\n' "$slug"
         printf '    <div class="card-title">%s</div>\n' "$esc_title"
         printf '    <div class="card-slug">%s</div>\n' "$esc_slug"
         [[ -n "$difficulty" ]] && printf '    <div class="card-difficulty">%s</div>\n' "$esc_difficulty"
+        [[ -n "$headline" ]] && printf '    <div class="card-headline">%s</div>\n' "$esc_headline"
         if [[ -n "$score_num" ]]; then
             printf '    <div class="card-score"><span class="score-num %s">%s</span><span class="score-label">%s</span></div>\n' \
                 "$score_level" "$score_num" "$esc_label"

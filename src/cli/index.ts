@@ -12,6 +12,7 @@ import { formatSarifOutput } from "./formatSarif";
 import { formatAnalysisReport } from "../lib/report";
 import { computeDriftScore } from "./scoring";
 import { buildDiffResult } from "./resultModel";
+import { buildNarrative } from "../analysis/narrative";
 import { parseGitArgs, resolveGitRef } from "./git";
 import { watchFiles } from "./watch";
 import { readAllStdin } from "./stdin";
@@ -66,6 +67,8 @@ Output formats:
   (default)             Colored terminal summary with drift score bar
   --md | --html | --json | --sarif | --compact | --github | --score | --stats
   -o, --out <file>      Write output to file instead of stdout
+  --no-narrative        Skip the narrative "top issues" layer in --html/--json
+                          (parser-dump view only; cites-every-finding layer off)
 
 Focus / noise control (override policy/config if passed):
   --only <cats>         Include only these finding categories (comma-separated)
@@ -184,6 +187,7 @@ function main() {
   const watchMode = flags.has("--watch") || flags.has("-w");
   const legacyExitCode = flags.has("--exit-code");
   const scoreOnly = flags.has("--score");
+  const noNarrative = flags.has("--no-narrative");
 
   const outFileArg = getFlagValue(args, ["-o", "--out"]);
   const onlyArg = getFlagValue(args, ["--only"]);
@@ -364,6 +368,9 @@ function main() {
         pathB: input.fileBPath || null,
         gitRef: input.gitSpec ? undefined : null,
       });
+      if (!noNarrative) {
+        (diffResult as unknown as Record<string, unknown>).narrative = buildNarrative(diffResult);
+      }
       const filtersMeta: Record<string, unknown> = {};
       if (onlyCats) filtersMeta.only = [...onlyCats];
       if (excludeCats) filtersMeta.exclude = [...excludeCats];
@@ -423,6 +430,7 @@ function main() {
         fileA: input.labelA,
         fileB: input.labelB,
         generatedAt: new Date().toISOString(),
+        narrative: !noNarrative,
       });
       emit(html);
       return finish(result, score);

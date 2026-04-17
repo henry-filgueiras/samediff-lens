@@ -14,6 +14,8 @@ The core analysis engine in `src/analysis/` is shared between both surfaces. It 
 
 **Dogfood loop (v0.6, session 8):** a `pull_request` GitHub Actions workflow runs SameDiff Lens on every PR to this repo. It narrows to high-signal markdown, uploads merged SARIF to Code Scanning, upserts one sticky PR comment, and fails the check on contradictions. No server, no GitHub App, no secrets — repo-native only.
 
+**Narrative interpretation (v0.7):** `src/analysis/narrative/` is a pure transformation layer over `DiffResult` that promotes raw heuristic findings into ranked **Issues** with forensic-report framing ("Requirement reversed on logging", "Rate limit constraint introduced", "Audit guarantee removed"). The layer doesn't touch the engine — it classifies → clusters → titles → ranks, citing every underlying finding. Default-on in `--html` and `--json`; `--no-narrative` opts out. Anti-hallucination contract: every Issue carries `supportingFindings[]` back-pointers; every title slot is filled from evidence verbatim or falls back to the raw summary.
+
 **Working surfaces:**
 - CLI: `./samediff left.md right.md` (auto-builds if stale)
 - Browser: `npm run dev` or live at GitHub Pages
@@ -59,9 +61,84 @@ The core analysis engine in `src/analysis/` is shared between both surfaces. It 
 **Example spectrum (examples/):**
 01-modal-shift → 02-todo-drift → 03-api-contract → 04-prompt-policy → 05-hydra-doc-drift
 
-**Test counts:** 26 engine tests + 100 CLI integration tests + 19 PR-reviewer tests, all passing
+**Test counts:** 28 engine tests + 100 CLI integration tests + 24 PR-reviewer tests + 9 narrative tests, all passing
 
 ## Devlog
+
+### 2026-04-17 — Claude Opus 4.7 — Narrative interpretation layer
+
+Raw heuristic findings were reading like compiler diagnostics
+("negation markers changed around performance/latency", "must → should",
+"centralized logging deferred") — technically accurate, but they left
+the reader to *infer* why they mattered. The product goal has shifted:
+surface narrative risk, not list findings. Think incident report, not
+parser dump.
+
+**The layer.** `src/analysis/narrative/` wraps `DiffResult` with a
+`NarrativeReport { headline, severity, issues[], quiet[] }`. Four pure
+stages, no engine changes:
+
+1. **classify** — table-driven promotion from raw structured fields:
+   `commitment-shift.evidence.triggers` → commitment-strengthening /
+   weakening / scope-narrowed; `contradiction.reason` → commitment-reversal
+   / policy-reversal / guarantee-removed / scope-narrowed; added/removed
+   concept substantiveness gated by a topic lexicon + numeric/capacity
+   language check.
+2. **cluster** — conservative same-kind + same-subject merge (preferring
+   topic nouns then backtick identifiers as the subject). Fallback exact-
+   text dedup handles the case where the engine extracts three phrases
+   from the same clause. Contradictions and renames never cluster.
+3. **template** — per-kind title constructors that only fill slots from
+   evidence verbatim. "Requirement reversed on logging: Logging is
+   optional but recommended... vs Logging is required...". No synthesis
+   of unseen content.
+4. **rank** — `salience = kindWeight × confidenceMult × topicBoost ×
+   clusterSizeBoost`. Topic lexicon *affects order only*, never the
+   text of a claim — that's the guardrail against editorialising.
+
+**Anti-hallucination contract.** Every Issue carries
+`supportingFindings: FindingRef[]` pointers into `DiffResult.findings`.
+`tools/narrative.test.mjs` enforces that pointers are real and in range
+for every generated issue across all six examples. If a template can't
+fill its slots from evidence, it falls back to the raw `summary`
+string rather than inventing.
+
+**Rendering.** `formatHtml.ts` gains a "Top finding" headline band, a
+Top Issues section with severity-tinted left borders, a collapsible
+"Quiet diff" bucket, and wraps the existing category cards in a
+`<details>` labeled "Supporting details · raw findings by category".
+Inspectability is preserved — the parser-dump view is one click away,
+not replaced. `formatJson.ts` gains a top-level `narrative` field
+(additive, non-breaking). Default-on in both; `--no-narrative` disables.
+
+**Task-only fallback.** A pure-checklist diff (example 02) would
+otherwise produce a blank Top Issues list — every finding is
+`task-scope-shift`, which is normally quiet-bucketed. When nothing
+else surfaces, up to 5 task changes are hoisted into Top and the
+headline becomes "Checklist churn: N added, M removed".
+
+**Evidence of the shift.**
+- 01 modal shift: "Requirement reversed on logging: Logging is optional
+  but recommended for debugging vs Logging is required for all
+  production deployments"
+- 03 API contract: "Rate limit constraint introduced: This endpoint is
+  rate-limited to 100 requests per minute per customer"
+- 04 prompt policy: "Policy reversed: You may offer opinions when asked
+  → You must not offer personal opinions..."
+- 06 secure gateway: "Audit guarantee removed: Every access attempt
+  must be logged to the centralized audit-log..."
+
+These read like accusations an engineer would stop scrolling for —
+which was the whole point.
+
+**Splash integration.** `examples/generate.sh` now extracts the
+narrative headline from each generated report and shows it on the
+splash card, so the stop-scrolling moment fires at the index level too.
+
+**Minor shell-wrapper fix.** The `samediff` wrapper's staleness check
+globbed `src/cli/*.ts src/analysis/*.ts` non-recursively, so edits
+inside `src/analysis/narrative/` wouldn't trigger a rebuild. Switched
+to a `find` so nested dirs are picked up.
 
 ### 2026-04-17 — Claude Opus 4.7 — Examples splash page
 
