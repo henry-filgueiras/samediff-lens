@@ -63,6 +63,19 @@ The core analysis engine in `src/analysis/` is shared between both surfaces. It 
 
 ## Devlog
 
+### 2026-04-17 — Claude Opus 4.7 — Examples splash page
+
+`examples/generate.sh` now emits a top-level `examples/findings.html`
+splash in addition to the per-example reports. The splash is a grid of
+cards, one per subdirectory, each linking to that example's
+`findings.html`. Cards show the README title (first `# ` heading), the
+difficulty line (`**Difficulty:** ...`), and the drift score + level
+parsed directly out of the generated per-example HTML — so the splash
+stays consistent with whatever the engine actually produced. Missing
+README or unparseable score degrades to just slug + whichever pieces
+are available. Same dark palette and `score-num` color classes as the
+per-example report so the two surfaces feel like one artifact.
+
 ### 2026-04-16 (session 8b) — Contradiction false-positive filters
 
 The very first live-ish run of the PR reviewer (session 8, dogfood branch
