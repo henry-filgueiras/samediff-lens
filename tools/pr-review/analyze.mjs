@@ -242,6 +242,8 @@ function distillFindings(findings) {
     commitmentShifts: (findings.commitmentShifts ?? []).map((f) => ({
       summary: f.summary,
       triggers: f.evidence?.triggers ?? [],
+      before: f.evidence?.before ?? null,
+      after: f.evidence?.after ?? null,
       anchor: anchorShort(f.provenance),
       anchored: !!f.provenance,
     })),

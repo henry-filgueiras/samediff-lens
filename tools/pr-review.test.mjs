@@ -120,8 +120,10 @@ function sampleIndex(overrides = {}) {
           ],
           commitmentShifts: [
             {
-              summary: "should → must",
+              summary: "Clients should validate tokens -> Clients must validate tokens (strengthens the commitment)",
               triggers: ["strengthens the commitment"],
+              before: "Clients should validate tokens before each request",
+              after: "Clients must validate tokens before each request",
               anchor: "after:2",
               anchored: true,
             },
@@ -381,6 +383,25 @@ test("comment renders advisory contradictions in a separate non-blocking section
   assert.match(body, /Tokens required vs\. optional.*_\[high\]_/);
   assert.match(body, /B narrows retry.*_\[low\]_/);
   assert.match(body, /Status: \*\*Blocked\*\* — 1 contradiction.*\+1 advisory/);
+});
+
+test("commitment shifts render structured BEFORE/AFTER sub-bullets, no duplicated trigger", () => {
+  const body = renderComment(sampleIndex());
+  // Headline uses the trigger, followed by the anchor, no parenthesised duplicate.
+  assert.match(
+    body,
+    /- `docs\/spec\.md` — strengthens the commitment @ after:2/,
+  );
+  assert.match(
+    body,
+    /- \*\*BEFORE:\*\* Clients should validate tokens before each request/,
+  );
+  assert.match(
+    body,
+    /- \*\*AFTER:\*\* Clients must validate tokens before each request/,
+  );
+  // Triggers text must not appear twice in a row (the old duplication bug).
+  assert.doesNotMatch(body, /strengthens the commitment.*strengthens the commitment/s);
 });
 
 test("comment status is Advisory when only low-confidence contradictions fire", () => {
