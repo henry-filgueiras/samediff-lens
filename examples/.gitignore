@@ -1,1 +1,4 @@
 *.html
+# samediff history emits this next to the per-pair reports; same
+# class of generated artifact as the HTML.
+trail.json

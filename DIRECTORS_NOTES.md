@@ -60,11 +60,67 @@ The core analysis engine in `src/analysis/` is shared between both surfaces. It 
 5. Added/removed concepts — unique tokens in focused phrase windows
 
 **Example spectrum (examples/):**
-01-modal-shift → 02-todo-drift → 03-api-contract → 04-prompt-policy → 05-hydra-doc-drift
+01-modal-shift → 02-todo-drift → 03-api-contract → 04-prompt-policy → 05-hydra-doc-drift → 08-policy-drift (history)
+
+Three example shapes, all driven by `examples/generate.sh`:
+- **pair** — `left.md` + `right.md` (`samediff check`). Examples 01–05.
+- **dir-pair** — `v1/` + `v2/` directories (`samediff dir`). Example 07.
+- **history** — a single tracked `.md` at the dir root with real git
+  history (`samediff history --no-empty`). Example 08. The generated
+  `index.html` is copied to `findings.html` so the splash-card scraper
+  picks up the worst-score `stat-num` class the same way it does for
+  the other shapes.
 
 **Test counts:** 28 engine tests + 112 CLI integration tests + 24 PR-reviewer tests + 23 narrative tests + 11 multi-file tests + 13 source-diff tests + 11 macro-thesis tests + 12 history+scan+audit tests, all passing (234 total)
 
 ## Devlog
+
+### 2026-04-18 — Claude Opus 4.7 — Git-history example (08-policy-drift)
+
+Added `examples/08-policy-drift/` — a "Nimbus Notes" privacy policy
+with 8 real commits on `policy.md`, each authored by a plausibly
+different persona (growth, legal, ai-eng, platform, bizdev, security,
+legal again). When Pages rebuilds, `examples/generate.sh` detects the
+new shape and runs `samediff history policy.md --no-empty`, publishing
+the trajectory index + 7 per-pair reports alongside the other example
+findings.
+
+The commit arc is deliberately uneven so the drift chart is visually
+informative:
+
+| step | commit | score | why |
+|---|---|---|---|
+| 0 | growth: carve out analytics exception | 4.9 (moderate) | "minimum data" softens + Mixpanel/PostHog added to sharing |
+| 1 | legal: add GDPR data-subject-rights | 1.4 (low) | additive — intentional valley |
+| 2 | ai: document prompt telemetry | 1.4 (low) | new section; subjects don't overlap baseline |
+| 3 | eng: rewrite encryption "for accuracy" | 3.9 (moderate) | E2EE claim quietly dropped + plaintext log disclosure |
+| 4 | bizdev: update data-sharing for partnerships | 3.6 (moderate) | "never sell" → "may share with research/ad partners" |
+| 5 | security: add 72h breach notification | 1.4 (low) | additive — second valley |
+| 6 | legal: simplify and modernize | **8.8 (critical)** | whole-doc rewrite to vague language |
+
+Worst score 8.8 critical; avg 3.6; zero theses fire because no single
+transition crosses the 3-issues-per-topic floor (cross-step thesis
+aggregation is not yet implemented — noting for the backlog). The
+splash page scrapes `stat-num critical` from the history index's
+stats grid and renders "8.8 Critical drift" on the card, same as the
+other examples.
+
+Shape support in `examples/generate.sh` is now three-way: pair (left
++ right), dir-pair (v1/ + v2/), and history (single non-README md at
+the dir root + git history). Detection is structural, not by name —
+no per-example branching. Also extended `examples/.gitignore` to
+cover `trail.json` since history emits it as a sibling of the HTML.
+
+**Not implemented (on purpose):**
+- No trail-level / cross-step thesis aggregation yet. The final-step
+  critical rewrite in 08-policy-drift would ideally fire a
+  "Compliance boundary weakened" thesis, but the drift is spread
+  across too many pairwise steps for per-pair thresholds to trip.
+  Logged as future work rather than tuning the doc to the detector.
+- No custom splash headline for history-shape examples. The shared
+  scraper looks for `thesis-headline` / `agg-thesis-headline` in
+  findings.html; the history index doesn't emit either. Acceptable
+  — the score + difficulty + title carry the card.
 
 ### 2026-04-18 — Claude Opus 4.7 — Severity-downgraded kind + weak-contradiction demotion
 
