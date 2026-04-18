@@ -62,9 +62,95 @@ The core analysis engine in `src/analysis/` is shared between both surfaces. It 
 **Example spectrum (examples/):**
 01-modal-shift → 02-todo-drift → 03-api-contract → 04-prompt-policy → 05-hydra-doc-drift
 
-**Test counts:** 28 engine tests + 109 CLI integration tests + 24 PR-reviewer tests + 19 narrative tests + 11 multi-file tests + 13 source-diff tests + 11 macro-thesis tests, all passing (215 total)
+**Test counts:** 28 engine tests + 112 CLI integration tests + 24 PR-reviewer tests + 19 narrative tests + 11 multi-file tests + 13 source-diff tests + 11 macro-thesis tests + 10 history+scan tests, all passing (228 total)
 
 ## Devlog
+
+### 2026-04-17 — Claude Opus 4.7 — `samediff scan` + `samediff history` (drift over time)
+
+User dropped two helper scripts in the tree (`scan.sh`,
+`diff_trail.sh`) doing in shell what the tool should be doing
+itself: list a repo's high-churn files, then walk every commit pair
+of one file generating per-pair HTML reports. Integrated both as
+first-class subcommands and added an index page on top.
+
+**`samediff scan [<dir>] [--top <N>]`.** Ranks `.md` / `.markdown` /
+`.txt` files under `<dir>` by commit count (`git rev-list --count
+HEAD -- <file>`). Defaults: scan `.`, top 20. Output is a clean
+two-column terminal table. Replaces `scan.sh`'s hardcoded
+`TARGET_DIR="text"` with a generic flag-driven CLI.
+
+**`samediff history <file> [-o <dir>] [--no-empty]`.** Walks every
+commit that touched `<file>` (chronological) and emits a per-pair
+HTML report for each consecutive transition, plus an `index.html`
+summary page and a `trail.json`. The first step is the
+EMPTY → first-commit baseline by default (uses the empty-tree SHA
+support landed earlier today); `--no-empty` skips it.
+
+Default output dir: `diffs/<basename>/`. Filename pattern:
+`<NNNN>-<from-short>-<to-short>.html`. The CLI prints the
+`index.html` path on stdout (everything else on stderr) so it
+pipes cleanly into `open "$(samediff history file.md | tail -1)"`.
+
+In-process per-pair generation — no shelling out to a node child
+per transition. Uses `analyzeTextPair` + `formatHtmlReport` directly.
+
+**Index page** (`formatHistoryHtml.ts`):
+- Header with file path, transition count, generated-at timestamp
+- Stats grid: transitions / worst score / avg score / theses fired
+  / composites fired
+- **SVG drift chart** — inline bars, x-axis = commit index, y-axis =
+  drift score 0–10, bars colored by severity tier
+  (green / yellow / orange / red), small blue triangle markers
+  above bars where a macro thesis fired. Native `<title>` tooltips
+  on every bar showing date / score / severity / thesis / top issue.
+- Per-transition step list — clickable rows linking to the per-pair
+  report, showing index, from→to short SHAs, severity tag, score,
+  commit subject, thesis (if fired), top issue, author + date +
+  finding count.
+
+**`trail.json`.** Machine-readable shape for downstream tooling:
+
+```jsonc
+{
+  "filePath": "DIRECTORS_NOTES.md",
+  "includesEmptyBaseline": true,
+  "steps": [
+    {
+      "index": 0,
+      "fromRef": "EMPTY",
+      "toRef": "b5e9b41...",
+      "toShort": "b5e9b41",
+      "authorName": "Henry Filgueiras",
+      "authorDate": "2026-04-16T11:26:03-07:00",
+      "commitSubject": "Add CLI proof object: ...",
+      "score": 1.4,
+      "severity": "low",
+      "thesis": null,        // or { headline, isComposite, confidence, themeId }
+      "topIssue": null,      // or { kind, title, severity }
+      "totalFindings": 4,
+      "htmlFilename": "0000-EMPTY-b5e9b41.html"
+    },
+    ...
+  ]
+}
+```
+
+**Wrapper plumbing.** Added `scan` and `history` to the wrapper's
+`SUBCOMMANDS` pass-through list and to `KNOWN_SUBCOMMANDS` in
+`subcommands.ts`. Also caught a wrapper bug while testing: `--top 5`
+was getting its value path-resolved (`/Users/henry/samediff-lens/5`)
+because `--top` wasn't in `VALUE_FLAGS_NONPATH`. Fixed and added a
+defensive `Number.isFinite` check on the parsed top in case any
+similar slip happens later.
+
+**Removed** `scan.sh` and `diff_trail.sh` from the tree — fully
+superseded by the subcommands.
+
+**10 new tests** in `tools/history-scan.test.mjs`: scan ordering,
+`--top` clamping, empty-results message; history step generation,
+`--no-empty`, index page contents, per-step shape, missing-history
+error.
 
 ### 2026-04-17 — Claude Opus 4.7 — Empty-tree SHA support (diff "from nothing")
 

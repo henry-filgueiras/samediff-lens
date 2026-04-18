@@ -176,7 +176,7 @@ export async function runBaseline(opts: BaselineOptions): Promise<{ outPath: str
 
 // ── dispatch helper ─────────────────────────────────────────────────
 
-export const KNOWN_SUBCOMMANDS = new Set(["init", "policies", "baseline", "check", "dir"]);
+export const KNOWN_SUBCOMMANDS = new Set(["init", "policies", "baseline", "check", "dir", "scan", "history"]);
 
 export function isSubcommand(arg: string | undefined): boolean {
   return !!arg && KNOWN_SUBCOMMANDS.has(arg);

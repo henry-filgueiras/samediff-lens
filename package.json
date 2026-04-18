@@ -18,6 +18,7 @@
     "test:multi": "node --test tools/multi-file.test.mjs",
     "test:source-diff": "node --test tools/source-diff.test.mjs",
     "test:macro": "node --test tools/macro-thesis.test.mjs",
+    "test:history": "node --test tools/history-scan.test.mjs",
     "test:pr-review": "node --test tools/pr-review.test.mjs",
     "preview": "vite preview"
   },

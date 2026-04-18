@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { readFileSync, writeFileSync } from "node:fs";
-import { basename, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { analyzeTextPair } from "../analysis/analyzeTextPair";
 import { formatCliOutput } from "./formatCli";
 import { formatHtmlReport } from "./formatHtml";
@@ -15,6 +15,8 @@ import { buildDiffResult } from "./resultModel";
 import { buildNarrative } from "../analysis/narrative";
 import { runMultiFile } from "./multiFile";
 import { formatMultiHtmlReport } from "./formatMultiHtml";
+import { scanChurn, renderScanTable } from "./scan";
+import { runHistory } from "./history";
 import { parseGitArgs, resolveGitRef } from "./git";
 import { watchFiles } from "./watch";
 import { readAllStdin } from "./stdin";
@@ -68,6 +70,13 @@ Usage:
   samediff dir <left-dir> <right-dir>      Compare every .md/.txt file under
                     [--json|--html]          two directory roots and emit one
                     [-o <path>]              aggregated narrative report
+
+  samediff scan [<dir>] [--top <N>]        Rank files under <dir> by commit
+                                             churn (default: . / top 20)
+  samediff history <file>                  Walk every commit pair for <file>,
+                    [-o <dir>]               emit per-pair HTML + an index
+                    [--no-empty]             page with a drift-over-time chart
+                                             (default outDir: diffs/<basename>/)
 
 Config & policy:
   --config <path>       Load an explicit .samediff.json (skip auto-discovery)
@@ -171,6 +180,12 @@ function main() {
   }
   if (subcommand === "dir") {
     return runDirCommand(args.slice(1), cwd);
+  }
+  if (subcommand === "scan") {
+    return runScanCommand(args.slice(1), cwd);
+  }
+  if (subcommand === "history") {
+    return runHistoryCommand(args.slice(1), cwd);
   }
   if (subcommand === "check") {
     // `check` is the explicit form; same pipeline as bareword invocation
@@ -804,6 +819,107 @@ function renderDirSummary(report: ReturnType<typeof runMultiFile>): string {
     }
   }
   return lines.join("\n") + "\n";
+}
+
+function runScanCommand(args: string[], cwd: string): void {
+  const topArg = getFlagValue(args, ["--top"]);
+  const parsedTop = topArg ? parseInt(topArg, 10) : NaN;
+  const topN = Number.isFinite(parsedTop) && parsedTop > 0 ? parsedTop : 20;
+
+  // First positional that isn't a value-eater target = scan dir.
+  let dir = ".";
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === "--") continue;
+    if (a.startsWith("-")) {
+      if (VALUE_TAKING_FLAGS.has(a) || a === "--top") i++;
+      continue;
+    }
+    dir = a;
+    break;
+  }
+
+  // The wrapper path-resolves the dir arg, but git rev-list needs a path
+  // relative to the repo's working tree root. Resolve to absolute, then
+  // make it relative to cwd if it lives under cwd.
+  const absDir = resolve(cwd, dir);
+  const relDir = absDir.startsWith(cwd + "/")
+    ? absDir.slice(cwd.length + 1)
+    : absDir === cwd
+      ? "."
+      : absDir;
+
+  let rows;
+  try {
+    rows = scanChurn({ dir: relDir, cwd });
+  } catch (err: any) {
+    console.error(`Error: ${err?.message ?? err}`);
+    process.exit(1);
+  }
+
+  process.stdout.write(`Scanned ${rows.length} file${rows.length === 1 ? "" : "s"} under ${shortPath(absDir)}\n`);
+  process.stdout.write(renderScanTable(rows, topN));
+  process.exit(0);
+}
+
+function runHistoryCommand(args: string[], cwd: string): void {
+  const outArg = getFlagValue(args, ["-o", "--out"]);
+  const noEmpty = hasFlag(args, "--no-empty");
+
+  let filePath: string | null = null;
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === "--") continue;
+    if (a.startsWith("-")) {
+      if (VALUE_TAKING_FLAGS.has(a)) i++;
+      continue;
+    }
+    filePath = a;
+    break;
+  }
+  if (!filePath) {
+    console.error("Usage: samediff history <file> [-o <dir>] [--no-empty]");
+    process.exit(2);
+  }
+
+  // git wants the path relative to the working tree. Wrapper resolved
+  // it to absolute; trim the cwd prefix if applicable.
+  const absFile = resolve(cwd, filePath);
+  const relFile = absFile.startsWith(cwd + "/")
+    ? absFile.slice(cwd.length + 1)
+    : absFile;
+
+  const outDir = outArg
+    ? resolve(cwd, outArg)
+    : resolve(cwd, "diffs", basename(relFile));
+
+  let report;
+  try {
+    report = runHistory({
+      filePath: relFile,
+      outDir,
+      cwd,
+      includeEmptyBaseline: !noEmpty,
+    });
+  } catch (err: any) {
+    console.error(`Error: ${err?.message ?? err}`);
+    process.exit(1);
+  }
+
+  // One-line summary on stderr; index path printed last for easy chaining.
+  const composites = report.steps.filter((s) => s.thesis?.isComposite).length;
+  const theses = report.steps.filter((s) => s.thesis !== null).length;
+  const maxScore = report.steps.reduce((m, s) => Math.max(m, s.score), 0);
+  console.error(
+    `samediff history: ${report.steps.length} transitions ` +
+    `(worst score ${maxScore.toFixed(1)}, ${theses} ${theses === 1 ? "thesis" : "theses"}, ` +
+    `${composites} composite${composites === 1 ? "" : "s"})`,
+  );
+  console.error(`Wrote ${report.steps.length} per-pair report${report.steps.length === 1 ? "" : "s"} + index.html + trail.json to ${shortPath(outDir)}`);
+  // The index.html path gets printed last on stdout so it can be piped /
+  // captured cleanly (e.g. `open "$(samediff history file.md | tail -1)"`).
+  process.stdout.write(join(outDir, "index.html") + "\n");
+  process.exit(0);
 }
 
 function runBaselineCommand(args: string[], cwd: string): void {
