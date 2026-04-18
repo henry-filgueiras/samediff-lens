@@ -37,6 +37,14 @@ Deleted notes are purged from our systems within 24 hours. If you
 delete your account, every byte associated with it — notes, metadata,
 backups — is removed within 30 days.
 
+## AI features
+
+Nimbus AI offers optional summarization and rewriting of your notes.
+When you use an AI feature, the content of the note being processed
+is sent to our inference provider for generation. Prompt and response
+pairs may be retained for up to 30 days to evaluate and improve model
+quality.
+
 ## Your rights
 
 You may export every note you have ever written, in its original form,
