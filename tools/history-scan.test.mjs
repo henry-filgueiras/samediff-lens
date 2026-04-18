@@ -9,7 +9,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -210,6 +210,214 @@ test("audit --max-diff-lines caps the per-step diff section", () => {
     // At least one step on this notes file should have >3 changed lines,
     // so we should see the elision marker somewhere.
     assert.match(audit, /more changed line.*elided/);
+  } finally {
+    rmSync(dir, { force: true, recursive: true });
+  }
+});
+
+// ── audit: persistent verdict memory ────────────────────────────────────
+
+test("audit writes a verdicts.json sidecar with one entry per step", () => {
+  const dir = mkdtempSync(resolve(tmpdir(), "samediff-audit-"));
+  try {
+    runWithStderr("history", "examples/01-modal-shift/left.md", "-o", dir);
+    run("audit", dir);
+
+    const verdictsPath = join(dir, "verdicts.json");
+    assert.ok(existsSync(verdictsPath), "verdicts.json should be emitted");
+
+    const store = JSON.parse(readFileSync(verdictsPath, "utf-8"));
+    assert.equal(store.version, "1");
+    assert.equal(typeof store.filePath, "string");
+    assert.ok(Array.isArray(store.entries));
+    assert.ok(store.entries.length >= 1);
+
+    // Each entry has the canonical identity + fingerprint fields.
+    for (const e of store.entries) {
+      assert.match(e.stepKey, /^sha256:[a-f0-9]+$/, "stepKey is a sha256 id");
+      assert.equal(typeof e.fromRef, "string");
+      assert.equal(typeof e.toRef, "string");
+      assert.equal(typeof e.findingsFingerprint, "string");
+      assert.equal(e.verdict, null, "fresh run: verdict is null");
+      assert.equal(typeof e.firstSeenAt, "string");
+    }
+
+    // First run reports everything as new.
+    const trail = JSON.parse(readFileSync(join(dir, "trail.json"), "utf-8"));
+    assert.equal(store.entries.length, trail.steps.length);
+  } finally {
+    rmSync(dir, { force: true, recursive: true });
+  }
+});
+
+test("audit rerun preserves prior verdicts across runs", () => {
+  const dir = mkdtempSync(resolve(tmpdir(), "samediff-audit-"));
+  try {
+    runWithStderr("history", "examples/01-modal-shift/left.md", "-o", dir);
+    run("audit", dir);
+
+    // Simulate a human editing a verdict slot in audit.md for step 0.
+    const auditPath = join(dir, "audit.md");
+    let audit = readFileSync(auditPath, "utf-8");
+    audit = audit.replace(
+      /\*\*verdict\*\*: _\( signal \| fp \| noise \| unclear — annotate here \)_/,
+      "**verdict**: signal",
+    );
+    writeFileSync(auditPath, audit, "utf-8");
+
+    // Rerun audit — the edited verdict should land in verdicts.json,
+    // and the regenerated audit.md should carry it forward inline.
+    run("audit", dir);
+
+    const store = JSON.parse(readFileSync(join(dir, "verdicts.json"), "utf-8"));
+    const withVerdict = store.entries.filter((e) => e.verdict !== null);
+    assert.equal(withVerdict.length, 1, "exactly one verdict should be recorded");
+    assert.equal(withVerdict[0].verdict, "signal");
+    assert.ok(withVerdict[0].verdictSetAt, "verdictSetAt should be populated");
+
+    const newAudit = readFileSync(auditPath, "utf-8");
+    assert.match(
+      newAudit,
+      /\*\*verdict\*\* \*\(carried from \d{4}-\d{2}-\d{2}\)\*: signal/,
+      "rendered audit.md should show the carried verdict",
+    );
+  } finally {
+    rmSync(dir, { force: true, recursive: true });
+  }
+});
+
+test("audit marks newly-introduced steps with [NEW] on first observation", () => {
+  const dir = mkdtempSync(resolve(tmpdir(), "samediff-audit-"));
+  try {
+    runWithStderr("history", "examples/01-modal-shift/left.md", "-o", dir);
+    run("audit", dir);
+
+    const audit = readFileSync(join(dir, "audit.md"), "utf-8");
+    // Fresh audit: every step is new.
+    const newMatches = audit.match(/`\[NEW\]`/g) ?? [];
+    const trail = JSON.parse(readFileSync(join(dir, "trail.json"), "utf-8"));
+    assert.equal(newMatches.length, trail.steps.length);
+
+    // Second run: nothing is new anymore.
+    run("audit", dir);
+    const audit2 = readFileSync(join(dir, "audit.md"), "utf-8");
+    const newMatches2 = audit2.match(/`\[NEW\]`/g) ?? [];
+    assert.equal(newMatches2.length, 0);
+  } finally {
+    rmSync(dir, { force: true, recursive: true });
+  }
+});
+
+test("audit surfaces orphaned verdicts when a step leaves the trail", () => {
+  const dir = mkdtempSync(resolve(tmpdir(), "samediff-audit-"));
+  try {
+    runWithStderr("history", "examples/01-modal-shift/left.md", "-o", dir);
+    run("audit", dir);
+
+    // Inject a synthetic prior verdict that has no matching live step.
+    // This simulates a prior trail that covered commits which are no
+    // longer in the current trail (rebase, branch cleanup, etc).
+    const verdictsPath = join(dir, "verdicts.json");
+    const store = JSON.parse(readFileSync(verdictsPath, "utf-8"));
+    store.entries.push({
+      stepKey: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      fromRef: "deadbeef",
+      toRef: "cafef00d",
+      toShort: "cafef00d",
+      filePath: store.filePath,
+      commitSubject: "old commit that got rebased away",
+      verdict: "fp",
+      note: "was a false positive — recorded last quarter",
+      firstSeenAt: "2026-01-01T00:00:00.000Z",
+      lastConfirmedAt: "2026-01-01T00:00:00.000Z",
+      verdictSetAt: "2026-01-01T00:00:00.000Z",
+      engineVersionAtJudgment: "0.7.0",
+      findingsFingerprint: "sha256:deadbeef",
+    });
+    writeFileSync(verdictsPath, JSON.stringify(store, null, 2), "utf-8");
+
+    // Rerun — the injected entry should become orphaned, not silently dropped.
+    run("audit", dir);
+
+    const store2 = JSON.parse(readFileSync(verdictsPath, "utf-8"));
+    assert.equal(store2.orphaned.length, 1);
+    assert.equal(store2.orphaned[0].verdict, "fp");
+    assert.equal(
+      store2.orphaned[0].note,
+      "was a false positive — recorded last quarter",
+    );
+    // Live entries should not include the orphan.
+    const hasOrphan = store2.entries.some((e) => e.toRef === "cafef00d");
+    assert.equal(hasOrphan, false);
+
+    // Rendered audit.md should surface the orphaned section.
+    const audit = readFileSync(join(dir, "audit.md"), "utf-8");
+    assert.match(audit, /## Orphaned verdicts/);
+    assert.match(audit, /fp/);
+  } finally {
+    rmSync(dir, { force: true, recursive: true });
+  }
+});
+
+test("audit flags [ENGINE-CHANGED] when a step's findings fingerprint drifts", () => {
+  const dir = mkdtempSync(resolve(tmpdir(), "samediff-audit-"));
+  try {
+    runWithStderr("history", "examples/01-modal-shift/left.md", "-o", dir);
+    run("audit", dir);
+
+    // Record a verdict on step 0, then corrupt the stored fingerprint
+    // to simulate the engine having moved since last review.
+    const auditPath = join(dir, "audit.md");
+    let audit = readFileSync(auditPath, "utf-8");
+    audit = audit.replace(
+      /\*\*verdict\*\*: _\( signal \| fp \| noise \| unclear — annotate here \)_/,
+      "**verdict**: signal",
+    );
+    writeFileSync(auditPath, audit, "utf-8");
+    run("audit", dir);
+
+    // Mutate the fingerprint on the first live entry so the next run
+    // sees the step as engine-changed.
+    const verdictsPath = join(dir, "verdicts.json");
+    const store = JSON.parse(readFileSync(verdictsPath, "utf-8"));
+    const withVerdict = store.entries.find((e) => e.verdict !== null);
+    assert.ok(withVerdict, "expected a stored verdict before the mutation");
+    withVerdict.findingsFingerprint = "sha256:stalefingerprint";
+    writeFileSync(verdictsPath, JSON.stringify(store, null, 2), "utf-8");
+
+    run("audit", dir);
+
+    const newAudit = readFileSync(auditPath, "utf-8");
+    assert.match(newAudit, /`\[ENGINE-CHANGED\]`/);
+    assert.match(newAudit, /re-review needed/);
+    // The verdict is preserved even though the fingerprint moved.
+    assert.match(newAudit, /carried from.*: signal/);
+
+    const store2 = JSON.parse(readFileSync(verdictsPath, "utf-8"));
+    const stillHas = store2.entries.find((e) => e.verdict === "signal");
+    assert.ok(stillHas, "verdict should carry forward across engine change");
+  } finally {
+    rmSync(dir, { force: true, recursive: true });
+  }
+});
+
+test("audit step identity is stable across trail regeneration", () => {
+  // Regenerating the trail on the same underlying git history should
+  // produce the same stepKeys — otherwise verdicts won't persist.
+  const dir = mkdtempSync(resolve(tmpdir(), "samediff-audit-"));
+  try {
+    runWithStderr("history", "examples/01-modal-shift/left.md", "-o", dir);
+    run("audit", dir);
+    const keys1 = JSON.parse(readFileSync(join(dir, "verdicts.json"), "utf-8"))
+      .entries.map((e) => e.stepKey).sort();
+
+    // Regenerate the trail from scratch and rerun audit.
+    runWithStderr("history", "examples/01-modal-shift/left.md", "-o", dir);
+    run("audit", dir);
+    const keys2 = JSON.parse(readFileSync(join(dir, "verdicts.json"), "utf-8"))
+      .entries.map((e) => e.stepKey).sort();
+
+    assert.deepEqual(keys2, keys1, "stepKeys must be stable across regeneration");
   } finally {
     rmSync(dir, { force: true, recursive: true });
   }

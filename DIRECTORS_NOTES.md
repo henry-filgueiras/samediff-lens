@@ -16,6 +16,8 @@ The core analysis engine in `src/analysis/` is shared between both surfaces. It 
 
 **Narrative interpretation (v0.7):** `src/analysis/narrative/` is a pure transformation layer over `DiffResult` that promotes raw heuristic findings into ranked **Issues** with forensic-report framing ("Requirement reversed on logging", "Rate limit constraint introduced", "Audit guarantee removed"). The layer doesn't touch the engine — it classifies → clusters → titles → ranks, citing every underlying finding. Default-on in `--html` and `--json`; `--no-narrative` opts out. Anti-hallucination contract: every Issue carries `supportingFindings[]` back-pointers; every title slot is filled from evidence verbatim or falls back to the raw summary.
 
+**Persistent judgment memory (v0.7.1):** `samediff audit` now preserves reviewer verdicts across reruns in a `verdicts.json` sidecar living next to `audit.md`. Step identity is `sha256(fromRef, toRef, filePath)` — stable across trail regeneration, rebase-sensitive (a new parent is a new step, which is correct). A separate findings fingerprint flags steps whose engine output has changed since the prior human judgment (`[ENGINE-CHANGED]` badge, re-review prompt) rather than silently rubber-stamping. The roundtrip is markdown-first: humans edit `**verdict**: <value>` slots in `audit.md`; rerun `samediff audit` harvests them into `verdicts.json`; subsequent renders carry prior verdicts inline with a `*(carried from YYYY-MM-DD)*` annotation. Orphaned verdicts (trail no longer contains the step) are retained in `verdicts.json#orphaned[]` and surfaced as a dedicated section in `audit.md` so a spec rewrite can't silently drop last quarter's FP judgments. observe → judge → preserve judgment, not observe → forget → repeat.
+
 **Working surfaces:**
 - CLI: `./samediff left.md right.md` (auto-builds if stale)
 - CLI multi-file: `./samediff dir <left-dir> <right-dir>` (one aggregated report across many files)
@@ -71,9 +73,126 @@ Three example shapes, all driven by `examples/generate.sh`:
   picks up the worst-score `stat-num` class the same way it does for
   the other shapes.
 
-**Test counts:** 28 engine tests + 112 CLI integration tests + 24 PR-reviewer tests + 23 narrative tests + 11 multi-file tests + 13 source-diff tests + 11 macro-thesis tests + 12 history+scan+audit tests, all passing (234 total)
+**Test counts:** 28 engine tests + 112 CLI integration tests + 24 PR-reviewer tests + 23 narrative tests + 11 multi-file tests + 13 source-diff tests + 11 macro-thesis tests + 18 history+scan+audit tests, all passing (240 total)
 
 ## Devlog
+
+### 2026-04-18 — Claude Opus 4.7 — Persistent verdict memory + README identity reset
+
+Two-part session. README overhaul first, then the foundation for
+persistent judgment in `samediff audit`.
+
+**README overhaul — from "diff tool with many flags" to "semantic-drift
+governance infrastructure."** The old README led with "surfaces the
+kinds of semantic changes that raw line diff misses," which undersold
+the actual product by a large margin. Rewrote to lead with the thesis
+("semantic drift is a governance problem, not a diff problem") and
+reframe the tool as an auditor / governance primitive. The new
+structure surfaces the three-tier doctrine (Thesis / Issue / Finding),
+the scan→history→audit workflow as a named governance loop, the
+dogfooded PR reviewer, SARIF export, provenance, and the
+deterministic / no-LLM / inspectable contract — each presented as a
+trust property, not a feature bullet. Examples table promoted to
+proof-object framing. Persistent-judgment section added to preview
+the verdict-memory work. Everything else preserved but reorganized;
+the flags reference survives, just scoped down.
+
+**Persistent verdict memory — the next foundation.** `samediff audit`
+used to emit `audit.md` with a `**verdict**` slot per step and then
+forget everything on the next run. Implemented the full persistence
+layer:
+
+- **`verdicts.json`** sidecar lives next to `audit.md` / `trail.json`
+  in the history output dir. Schema: `version`, `filePath`,
+  `generatedAt`, `engineVersion`, `entries[]`, `orphaned[]`. Each
+  entry carries `stepKey`, `fromRef`, `toRef`, `commitSubject`,
+  `verdict` (`signal` | `fp` | `noise` | `unclear` | null), `note`,
+  `firstSeenAt`, `lastConfirmedAt`, `verdictSetAt`,
+  `engineVersionAtJudgment`, `findingsFingerprint`.
+- **Identity:** `stepKey = sha256(fromRef + "\n" + toRef + "\n" +
+  filePath)`, truncated to 32 hex chars. The tuple `(from, to, file)`
+  is the right granularity — stable across regeneration, rebase-aware
+  (a different parent = a different transition, correctly), and
+  cheap to compute. Commit-SHA-only was rejected because the same
+  commit can appear with different parents across trail rebuilds;
+  content hashing was rejected because small cosmetic edits to the
+  from/to source would change identity even when the logical
+  transition is the same.
+- **Findings fingerprint:** canonical hash of the structural finding
+  list (type + normalized evidence fields + key tags, sorted). When
+  the engine retunes or the source changes such that findings shift,
+  the fingerprint moves and the step is flagged `[ENGINE-CHANGED]`.
+  The prior verdict is preserved but the reviewer is prompted to
+  confirm — engine evolution is reviewable *against* prior judgment,
+  not silently applied.
+- **Roundtrip:** markdown-first. Humans edit `**verdict**: signal`
+  (or fp/noise/unclear) directly in `audit.md`; `samediff audit`
+  harvests those via a `<!-- step: <stepKey> -->` HTML comment
+  anchor + a tolerant `**verdict**:` line parser (accepts synonyms,
+  short forms, and `s`/`n`/`u`/`?` single-char forms). Re-rendering
+  shows `**verdict** *(carried from 2026-04-18)*: signal` with the
+  note preserved below.
+- **Status badges in `audit.md`:** `[NEW]` for first-observation
+  steps, `[ENGINE-CHANGED]` for steps whose findings have shifted
+  since the last recorded verdict, no badge for clean persistence.
+  Step-state summary block at the top of the document breaks down
+  new / persisted / engine-changed / orphaned counts.
+- **Orphans:** verdicts whose `stepKey` is no longer in the live
+  trail stay in `verdicts.json#orphaned[]` instead of being dropped,
+  and surface as a dedicated "Orphaned verdicts" section in
+  `audit.md`. A spec rewrite can't silently erase last quarter's FP
+  judgments.
+- **Migration from inline-only verdicts:** no explicit migration
+  step needed. On the first run after this change, `verdicts.json`
+  is absent, so `entries[]` is populated from the current trail with
+  all verdicts `null`. If there's an existing `audit.md` with
+  verdict slots already filled in, the harvest step parses them out
+  and populates the initial `verdicts.json` in the same run. Prior
+  inline verdicts are never lost.
+
+**Data model decisions worth recording:**
+- `verdict: null` (explicit) vs. absent — we always emit the field
+  so downstream consumers don't have to do presence-checks.
+- `lastConfirmedAt` is "last run that observed this stepKey," not
+  "last run that confirmed the verdict unchanged." Orphaned entries
+  do NOT get `lastConfirmedAt` bumped — that's how a consumer can
+  distinguish "still in the trail" from "preserved from history."
+- `findingsFingerprint` normalizes evidence (trim + collapse
+  whitespace) before hashing so cosmetic line-level churn doesn't
+  spuriously flip to ENGINE-CHANGED. Real finding-set churn (a new
+  commitment-shift, a different contradiction confidence, a
+  rename-vs-separate-concepts reshuffle) does flip it.
+
+**Six new tests** in `tools/history-scan.test.mjs`:
+- first run emits `verdicts.json` with one entry per trail step, all
+  `verdict: null`
+- editing `**verdict**: signal` in `audit.md` and rerunning harvests
+  the edit into `verdicts.json` and re-renders with a carried-verdict
+  header
+- `[NEW]` badges appear only on first observation — gone on rerun
+- synthetic orphan entry is preserved in `orphaned[]` and surfaced
+  in a rendered "Orphaned verdicts" section
+- mutated fingerprint → `[ENGINE-CHANGED]` badge + re-review prompt,
+  verdict still carried forward
+- stepKeys are stable across trail regeneration (regenerating
+  `trail.json` on the same git history produces identical keys)
+
+Total test count: 234 → 240. All passing.
+
+**What's next (not built):**
+- A `samediff audit --harvest` flag that runs *only* the harvest
+  step (parse `audit.md` → update `verdicts.json`) without
+  re-rendering. Useful for automation pipelines that want to capture
+  review output after a CI step without rerunning the engine.
+  Deferred — the combined flow covers every current use case.
+- Cross-trail verdict export / import for sharing reviewer judgment
+  between repos or reviewers. Also deferred — single-trail
+  persistence is the foundation; aggregation comes later.
+- Verdict diffing between runs (show exactly what a rerun changed,
+  beyond the badges). The data is there in `verdictSetAt` + engine
+  version; rendering is future work.
+
+Trust infrastructure first. Scale second. This is the foundation.
 
 ### 2026-04-18 — Claude Opus 4.7 — Pages checkout depth fix
 
