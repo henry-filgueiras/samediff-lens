@@ -66,6 +66,78 @@ The core analysis engine in `src/analysis/` is shared between both surfaces. It 
 
 ## Devlog
 
+### 2026-04-17 — Claude Opus 4.7 — Dogfood cleanup: imperative shape + `**Topic:**` sections + stricter cross-section floor
+
+Running the new two-ref form against our own notes file —
+`samediff --git HEAD~3 HEAD -- DIRECTORS_NOTES.md` — surfaced three
+classes of FPs that were load-bearing enough to matter:
+
+**1. Fake TODOs from the imperative-shape heuristic.**
+The engine's action-item detector fired on the `ACTION_VERBS + short`
+branch for any line whose first stemmed token matched
+`add/audit/build/…/test/…`. The stemmer maps `tests → test` and
+`added → add`, so a declarative sentence like
+`Tests.** 5 new in tools/cli.test.mjs:` or `Added a macro layer that…`
+got classified as a TODO. Lots of green `+ TODO added:` lines in the
+dogfood output were these fragments.
+
+Fixed by extracting the ACTION_VERBS branch into a new
+`looksImperative(raw, firstStem)` with five guards (all required):
+- first stemmed token in `ACTION_VERBS`
+- length < 140
+- no markdown punctuation (`*` / `_` / `:` / `` ` ``) in the first 60
+  chars — signals labels, headings, code spans
+- no copula/auxiliary (`is/are/was/were/has/have/been/being`) — those
+  are declarative, not commands
+- original (pre-stem) word must not end in `-ed`, `-ing`, or trailing
+  `-s` (rules out past tense, gerunds, plural nouns, 3rd-person
+  singular). `-ss` endings like `address` stay intact.
+
+Every checkbox / TODO-prefixed action item still matches; only the
+fallback imperative branch got tightened. The engine's existing 28
+tests cover both paths and still pass.
+
+**2. `**Topic:**` topic labels weren't being detected as sections.**
+`extractUnits` had a topic regex for the `**Topic**:` form (colon
+*outside* the bold) that fires on example 06's bullets. But
+DIRECTORS_NOTES.md uses `**Topic:**` (colon *inside* the bold),
+which slipped through unsectioned — so the cross-section guard
+never fired when contradicting lines were under different
+`**Topic:**` labels. Added a second regex that accepts the
+inside-colon variant. Both are conventional markdown; both should
+work.
+
+**3. Cross-section anchor floor raised from 3 → 4.**
+Even with sections correctly detected, cross-section FPs kept
+firing on 2- or 3-anchor overlaps of generic engineering-doc words
+like `diff/file/section` and `multi/file/page`. Three shared anchors
+sound like "same subject" but in a tool's own docs they're
+coincidence, not continuity. Real same-subject contradictions tend
+to share 4+ strong tokens because they're talking about the same
+thing in detail. Bumped the cross-section floor to 4.
+
+**Dogfood result.**
+
+| metric | before | after |
+|---|---|---|
+| drift score | 7.2 (high/critical) | 5.1 (high) |
+| fake "TODO added" entries | 5 | 0 |
+| Top-tier policy-reversal FPs | 2 | 1 |
+
+The one remaining contradiction is `**Repo-relative URIs, not
+file:// absolute.**` vs `file paths must be repo-relative)` — both
+in the same devlog entry, so same-section, so the cross-section
+guard can't help. The narrative-layer `isWeakContradiction`
+quarantine doesn't fire because one side has no extractable subject.
+Documented but not fixed here — acceptable residual noise.
+
+**Canonical examples.** Survey after changes: 01–05 unchanged, 06's
+thesis flipped from "Compliance controls relaxed for beta rollout"
+to "Compliance boundary weakened" (both in the fixed catalog — the
+security+compliance composite now outweighs staging+compliance
+because the now-properly-sectioned `**Topic:**` lines in v2 cut
+some weak staging-lexicon matches). 07 unchanged.
+
 ### 2026-04-17 — Claude Opus 4.7 — Two-ref --git form (no working tree needed)
 
 `--git <ref> -- <file>` only compared `ref:file` against the working

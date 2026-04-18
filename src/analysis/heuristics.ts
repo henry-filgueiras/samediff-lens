@@ -199,9 +199,19 @@ export function extractUnits(text: string): Unit[] {
     // Inline `**Topic**:` (or `__Topic__:`) prefix wins over heading for
     // this line — it identifies the bullet's own subject. Allows an
     // optional bullet/list marker first ("1. **Performance**:").
-    const topicMatch = line.match(
-      /^(?:[-*\u2022]|\d+[.)])?\s*(?:\*\*|__)([^*_\n]{1,80}?)(?:\*\*|__)\s*[:\u2014\u2013\u2010-]/,
-    );
+    //
+    // Two valid markdown variants we both accept:
+    //   `**Topic**: rest…`   colon outside the bold delimiters
+    //   `**Topic:** rest…`   colon inside the bold delimiters
+    // The second form is what DIRECTORS_NOTES.md uses and was
+    // previously slipping through unsection-tagged.
+    const topicMatch =
+      line.match(
+        /^(?:[-*\u2022]|\d+[.)])?\s*(?:\*\*|__)([^*_\n]{1,80}?)(?:\*\*|__)\s*[:\u2014\u2013\u2010-]/,
+      ) ??
+      line.match(
+        /^(?:[-*\u2022]|\d+[.)])?\s*(?:\*\*|__)([^*_\n]{1,80}?)[:\u2014\u2013\u2010-]\s*(?:\*\*|__)/,
+      );
     const lineSection = topicMatch
       ? normalizeSectionLabel(topicMatch[1])
       : currentHeading;
@@ -238,6 +248,7 @@ function buildUnit(raw: string): Unit {
   const tokens = tokenize(normalized).map((token) => stemToken(token));
   const contentTokens = tokens.filter((token) => isContentToken(token));
   const firstToken = tokens[0] ?? "";
+  const imperative = looksImperative(raw, firstToken);
 
   return {
     raw: raw.replace(/[.;!?]+$/g, "").trim(),
@@ -247,16 +258,56 @@ function buildUnit(raw: string): Unit {
     isActionItem:
       /^[\s-]*\[[ x]\]/i.test(raw) ||
       /^todo[:\s-]/i.test(raw) ||
-      (ACTION_VERBS.has(firstToken) && raw.length < 140),
+      imperative,
     isCommitmentLike:
       containsAny(raw, COMMITMENT_MARKERS) ||
       /^be\b/i.test(raw) ||
       containsAny(raw, ["always", "never", "required", "optional"]),
     isDirectiveLike:
       /^be\b/i.test(raw) ||
-      (ACTION_VERBS.has(firstToken) && raw.length < 140) ||
+      imperative ||
       /\b(challenge|separate|prefer|avoid|keep)\b/i.test(raw),
   };
+}
+
+/**
+ * "Looks imperative" — used as a fallback signal for action-item /
+ * directive detection on lines that aren't checkbox-prefixed or
+ * `TODO:`-prefixed.
+ *
+ * The raw heuristic ("first token is in ACTION_VERBS and line is
+ * short") was triggering on declarative sentences like
+ * `Tests.** 5 new in tools/cli.test.mjs:` and `Added a macro layer
+ * that…` because the stemmer maps `tests → test` and `added → add`,
+ * both of which are in ACTION_VERBS. Sentence fragments that happen
+ * to start with a plural noun or past-tense verb were being
+ * mis-classified as action items.
+ *
+ * Tightened rules — all must hold:
+ *   - first stemmed token must be in ACTION_VERBS
+ *   - the original (pre-stem) word must not end in -s / -ed / -ing
+ *     (rules out plural nouns and past-tense / gerund usage)
+ *   - line length < 140 (action items are usually short)
+ *   - no early markdown punctuation (`*`, `_`, `:`, `\``) within the
+ *     first 30 chars — those signal labels, headings, or doc structure
+ *   - no copula or auxiliary (`is/are/was/were/has/have/been/being`)
+ *     — those signal declarative statements, not commands
+ */
+function looksImperative(raw: string, firstStem: string): boolean {
+  if (!ACTION_VERBS.has(firstStem)) return false;
+  if (raw.length >= 140) return false;
+  // Early markdown punctuation usually signals labels / headings / code
+  // spans rather than commands. 60-char window catches lines like
+  // "Test enforces that every word in `evidenceTopics`" where the
+  // backtick sits past the first 30 chars.
+  if (/[*_:`]/.test(raw.slice(0, 60))) return false;
+  if (/\b(is|are|was|were|has|have|been|being)\b/i.test(raw)) return false;
+  const originalFirst = raw.match(/^\s*([A-Za-z]+)/)?.[1] ?? "";
+  // Reject -ed (past tense), -ing (gerund), and trailing -s (plural noun
+  // or 3rd-person singular), but keep -ss intact (e.g. "address").
+  if (/(ed|ing)$/i.test(originalFirst)) return false;
+  if (/[^s]s$/i.test(originalFirst)) return false;
+  return true;
 }
 
 export function matchUnits(aUnits: Unit[], bUnits: Unit[]): MatchedPair[] {
@@ -655,14 +706,28 @@ export function detectPossibleContradictions(aUnits: Unit[], bUnits: Unit[]): Co
       // Cross-section guard: when both sides sit inside topical contexts
       // (markdown heading or `**Topic**:` prefix) and those contexts
       // disagree, the pair must clear a stronger bar than same-section
-      // pairs. This catches the classic FP of pairing one bullet's
-      // **Performance** sentence with another bullet's **Authentication**
-      // sentence just because they share `should`/`request`.
+      // pairs. This catches two FP classes:
+      //
+      //   1. One bullet's **Performance** sentence paired with another
+      //      bullet's **Authentication** sentence on `should`/`request`.
+      //   2. Engineering-doc generics like `diff/file` or `all/pass`
+      //      lining up between unrelated devlog paragraphs.
+      //
+      // Two strong shared anchors aren't enough on their own — a real
+      // cross-section contradiction needs richer subject continuity.
+      // Four is the conservative floor.
+      //
+      // Empirical: dogfooding `--git HEAD~3 HEAD -- DIRECTORS_NOTES.md`
+      // produced FP pairs with 3 shared anchors like `file/section/exist`
+      // or `multi/file/page` — generic words that appear across many
+      // devlog paragraphs without indicating subject continuity. Real
+      // same-subject contradictions tend to share four or more strong
+      // tokens because they're talking about the same thing in detail.
       const aSec = a.section ?? null;
       const bSec = b.section ?? null;
       const crossSection = aSec !== null && bSec !== null && aSec !== bSec;
       if (crossSection) {
-        if (sharedAnchors.length < 2) return;
+        if (sharedAnchors.length < 4) return;
         if (sim < 0.18) return;
       }
 
