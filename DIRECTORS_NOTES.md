@@ -77,6 +77,40 @@ Three example shapes, all driven by `examples/generate.sh`:
 
 ## Devlog
 
+### 2026-04-18 — Claude Opus 4.7 — `samediff-audit` cantrip + Rust RFC dogfood
+
+Packaged the scan → history → audit loop as a single-command cantrip
+at `tools/samediff-audit.sh`. Runs from inside any git repo; resolves
+the samediff binary from `SAMEDIFF` env, `./samediff`, `$PATH`, or
+the script's own parent repo; supports `--top`, `--pick N`, `-y`
+for non-interactive flows and a plain interactive prompt otherwise;
+default output dir is `.samediff/<basename>/`.
+
+**Dogfood on Rust RFCs** (`~/rfcs`). Scan ranked
+`text/3537-msrv-resolver.md` (163 commits) as the top-churn file;
+picked the medium-sized `text/3698-declarative-derive-macros.md`
+(42 commits) for the demo. The audit surfaced 14 high/critical
+transitions out of 42. Step 29 ("Updates from design meeting",
+score 7.2 critical) cleanly exposed a syntactic flip:
+`#[macro_derive]` attribute → `derive()` rules, with the
+commitment-shift detector catching the evidence text literally
+reversing (`"similar to ˋattr()ˋ rules"` → `"inconsistent with
+ˋattr()ˋ rules"`) inside the same commit. Three low-confidence
+same-section contradiction FPs were marked fp at the finding level;
+the step-level verdict stayed `signal` with a note. Rerun of the
+cantrip confirmed: all 42 steps + 238 findings persisted, three
+carried-fp tags rendered inline on the marked findings, and the
+`finding-verdicts` block re-rendered as a concrete list ready for
+further edits. Exactly the institutional-memory loop the v2 schema
+was designed for.
+
+**Known limitation:** the cantrip always re-runs `samediff history`
+even when git HEAD hasn't moved, which re-engines every transition.
+For 163-step trails that's ~10 min per invocation. Trivial to cache
+(skip history when `trail.json`'s `generatedAt` postdates the most
+recent commit touching the file), but deferred — current behavior
+is correct, just slow on the largest targets.
+
 ### 2026-04-18 — Claude Opus 4.7 — Verdict memory v2: per-finding fingerprints + identity as foundation
 
 Same-day sharpening of the verdict-memory landing. The v1 design
