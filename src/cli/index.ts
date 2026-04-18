@@ -17,6 +17,7 @@ import { runMultiFile } from "./multiFile";
 import { formatMultiHtmlReport } from "./formatMultiHtml";
 import { scanChurn, renderScanTable } from "./scan";
 import { runHistory } from "./history";
+import { runAudit, renderAuditSummary } from "./audit";
 import { parseGitArgs, resolveGitRef } from "./git";
 import { watchFiles } from "./watch";
 import { readAllStdin } from "./stdin";
@@ -77,6 +78,9 @@ Usage:
                     [-o <dir>]               emit per-pair HTML + an index
                     [--no-empty]             page with a drift-over-time chart
                                              (default outDir: diffs/<basename>/)
+  samediff audit <history-dir>             Generate audit.md — compact per-step
+                    [--max-diff-lines <N>]   markdown (findings + diff inline)
+                    [--include-quiet]        for human/LLM signal-vs-noise judgment
 
 Config & policy:
   --config <path>       Load an explicit .samediff.json (skip auto-discovery)
@@ -186,6 +190,9 @@ function main() {
   }
   if (subcommand === "history") {
     return runHistoryCommand(args.slice(1), cwd);
+  }
+  if (subcommand === "audit") {
+    return runAuditCommand(args.slice(1), cwd);
   }
   if (subcommand === "check") {
     // `check` is the explicit form; same pipeline as bareword invocation
@@ -919,6 +926,46 @@ function runHistoryCommand(args: string[], cwd: string): void {
   // The index.html path gets printed last on stdout so it can be piped /
   // captured cleanly (e.g. `open "$(samediff history file.md | tail -1)"`).
   process.stdout.write(join(outDir, "index.html") + "\n");
+  process.exit(0);
+}
+
+function runAuditCommand(args: string[], cwd: string): void {
+  const maxDiffArg = getFlagValue(args, ["--max-diff-lines"]);
+  const parsedMax = maxDiffArg ? parseInt(maxDiffArg, 10) : NaN;
+  const maxDiffLines = Number.isFinite(parsedMax) && parsedMax > 0 ? parsedMax : 60;
+  const includeQuiet = hasFlag(args, "--include-quiet");
+
+  let historyDir: string | null = null;
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === "--") continue;
+    if (a.startsWith("-")) {
+      if (VALUE_TAKING_FLAGS.has(a) || a === "--max-diff-lines") i++;
+      continue;
+    }
+    historyDir = a;
+    break;
+  }
+  if (!historyDir) {
+    console.error("Usage: samediff audit <history-dir> [--max-diff-lines <N>] [--include-quiet]");
+    process.exit(2);
+  }
+
+  const absDir = resolve(cwd, historyDir);
+  let summary;
+  try {
+    summary = runAudit({
+      historyDir: absDir,
+      cwd,
+      maxDiffLines,
+      includeQuiet,
+    });
+  } catch (err: any) {
+    console.error(`Error: ${err?.message ?? err}`);
+    process.exit(1);
+  }
+
+  process.stdout.write(renderAuditSummary(summary));
   process.exit(0);
 }
 

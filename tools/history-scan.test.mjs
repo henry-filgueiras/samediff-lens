@@ -175,3 +175,42 @@ test("history errors cleanly for a path with no git history", () => {
     assert.match(err.stderr ?? err.message, /no git history/);
   }
 });
+
+// ── audit ──────────────────────────────────────────────────────────────────
+
+test("audit produces a per-step markdown report from a history outdir", () => {
+  const dir = mkdtempSync(resolve(tmpdir(), "samediff-audit-"));
+  try {
+    runWithStderr("history", "examples/01-modal-shift/left.md", "-o", dir);
+    const summaryOut = run("audit", dir);
+    assert.match(summaryOut, /samediff audit/);
+    assert.match(summaryOut, /wrote .*audit\.md/);
+
+    const audit = readFileSync(join(dir, "audit.md"), "utf-8");
+    // Header
+    assert.match(audit, /^# Audit/);
+    // At least one per-step block with the canonical structure
+    assert.match(audit, /## Step \d+/);
+    assert.match(audit, /\*\*findings\*\*/);
+    assert.match(audit, /\*\*diff\*\* \(changed lines only\)/);
+    assert.match(audit, /\*\*verdict\*\*/);
+    // Diff fence
+    assert.match(audit, /```diff/);
+  } finally {
+    rmSync(dir, { force: true, recursive: true });
+  }
+});
+
+test("audit --max-diff-lines caps the per-step diff section", () => {
+  const dir = mkdtempSync(resolve(tmpdir(), "samediff-audit-"));
+  try {
+    runWithStderr("history", "DIRECTORS_NOTES.md", "-o", dir);
+    run("audit", dir, "--max-diff-lines", "3");
+    const audit = readFileSync(join(dir, "audit.md"), "utf-8");
+    // At least one step on this notes file should have >3 changed lines,
+    // so we should see the elision marker somewhere.
+    assert.match(audit, /more changed line.*elided/);
+  } finally {
+    rmSync(dir, { force: true, recursive: true });
+  }
+});

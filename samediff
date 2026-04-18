@@ -8,11 +8,11 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # Flags that take a value on the next arg. Their values must NOT be
 # path-resolved (they're category names, specs, etc.) — except the PATH
 # ones whose values are files.
-VALUE_FLAGS_NONPATH=("--only" "--exclude" "--fail-on" "--policy" "--top")
+VALUE_FLAGS_NONPATH=("--only" "--exclude" "--fail-on" "--policy" "--top" "--max-diff-lines")
 VALUE_FLAGS_PATH=("-o" "--out" "--baseline" "--config")
 
 # Subcommands are pass-through tokens; don't path-resolve them.
-SUBCOMMANDS=("init" "policies" "baseline" "check" "dir" "scan" "history")
+SUBCOMMANDS=("init" "policies" "baseline" "check" "dir" "scan" "history" "audit")
 
 is_in() {
   local needle="$1"; shift

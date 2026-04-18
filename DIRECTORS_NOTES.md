@@ -62,9 +62,67 @@ The core analysis engine in `src/analysis/` is shared between both surfaces. It 
 **Example spectrum (examples/):**
 01-modal-shift → 02-todo-drift → 03-api-contract → 04-prompt-policy → 05-hydra-doc-drift
 
-**Test counts:** 28 engine tests + 112 CLI integration tests + 24 PR-reviewer tests + 19 narrative tests + 11 multi-file tests + 13 source-diff tests + 11 macro-thesis tests + 10 history+scan tests, all passing (228 total)
+**Test counts:** 28 engine tests + 112 CLI integration tests + 24 PR-reviewer tests + 19 narrative tests + 11 multi-file tests + 13 source-diff tests + 11 macro-thesis tests + 12 history+scan+audit tests, all passing (230 total)
 
 ## Devlog
+
+### 2026-04-18 — Claude Opus 4.7 — `samediff audit` (per-step signal/noise judgment)
+
+Added a third subcommand on top of the history pipeline to make it
+easy to scroll through a trail and judge each step: signal, FP,
+noise, or unclear. Designed for human OR LLM review.
+
+`samediff audit <history-dir> [--max-diff-lines N] [--include-quiet]`
+reads `trail.json`, re-runs the engine per step (cheap), and emits
+`audit.md` — a markdown doc with one dense block per step:
+
+- header line: index, from→to short SHAs, score, severity
+- date + author + commit subject
+- thesis (if any) + top issue
+- every finding as a one-liner with category tag and short
+  before/after evidence (commitment shifts, contradictions,
+  renames, +/- concepts, task transitions)
+- the source diff with ONLY changed lines (no context),
+  capped at `--max-diff-lines` (default 60)
+- a `**verdict**` slot for annotation
+
+The terseness is deliberate — each step fits in ~15–30 lines so a
+reviewer can scroll through 50 steps in one sitting and spot
+patterns without each block pushing context off the screen.
+
+Used immediately to dogfood-audit `text/1946-intra-rustdoc-links.md`
+(14 transitions) from an external Rust RFCs checkout, which surfaced
+several patterns worth following up on:
+
+1. **Within-section cross-line contradiction FPs persist.** Even
+   with the cross-section guard, large flat sections like the RFC's
+   "Path Ambiguities" cluster everything under one section header,
+   so the engine pairs unrelated negation-bearing lines as
+   contradictions. Steps 3-7 each have 1-3 negation-flip FPs.
+
+2. **`error` → `warning` is mis-framed as "Policy reversed."**
+   Step 11 cleanly downgraded all "give an error" → "give a
+   warning" sites. The contradiction detector pairs "no error" /
+   "no warning" as a polarity flip and the narrative layer headlines
+   it as policy reversal. The truthful read is "severity downgraded"
+   — we don't have that classification yet.
+
+3. **First-commit baseline produces metadata-noise concept floods.**
+   URLs, RFC numbers, dates all become "added concepts" when the
+   from-side is EMPTY. Filterable.
+
+4. **Concept extraction picks mid-sentence fragments.** `"you use a
+   non"`, `"disambiguation markers using"`, `"fine and preferred"`
+   are mostly artifacts of the focused-phrase extractor's window —
+   not standalone semantic units.
+
+5. **Thesis layer correctly stayed silent** on the entire 14-step
+   trajectory. None of these RFC edits coordinated across themes
+   (security/reliability/etc.); incremental clarification doesn't
+   earn a macro headline. Conservatism working as intended.
+
+Two new tests in `tools/history-scan.test.mjs` cover the audit
+command shape + `--max-diff-lines` clipping.
 
 ### 2026-04-17 — Claude Opus 4.7 — `samediff scan` + `samediff history` (drift over time)
 
