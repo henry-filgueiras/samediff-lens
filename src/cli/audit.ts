@@ -42,6 +42,11 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { analyzeTextPair } from "../analysis/analyzeTextPair";
 import { buildNarrative } from "../analysis/narrative";
+import {
+  buildTrailThesis,
+  type TrailThesis,
+  type StepNarrativeInput,
+} from "../analysis/narrative/trail";
 import { buildDiffResult, type DiffResult } from "./resultModel";
 import { diffLinesWithHunks } from "./sourceDiff";
 import type { HistoryReport, HistoryStep } from "./history";
@@ -721,6 +726,24 @@ export function runAudit(opts: AuditOptions): AuditSummary {
     orphanedSteps.push({ ...step });
   }
 
+  // ── Trail (history) thesis ────────────────────────────────────
+  // Runs over the per-step narratives we already computed above.
+  // Preserves the finding → issue → thesis hierarchy: trail cites
+  // real Issues from real steps, never skipping to raw findings.
+  const trailInputs: StepNarrativeInput[] = rendered.map((r) => ({
+    stepIndex: r.step.index,
+    fromRef: r.step.fromRef,
+    toRef: r.step.toRef,
+    toShort: r.step.toShort,
+    authorName: r.step.authorName,
+    authorDate: r.step.authorDate,
+    commitSubject: r.step.commitSubject,
+    severity: r.step.severity,
+    score: r.step.score,
+    issues: [...r.analysis.narrative.issues, ...r.analysis.narrative.quiet],
+  }));
+  const trailThesis = buildTrailThesis(trailInputs);
+
   // ── Write audit.md ────────────────────────────────────────────
   const sections: string[] = [];
   sections.push(`# Audit — ${trail.filePath}\n`);
@@ -728,6 +751,9 @@ export function runAudit(opts: AuditOptions): AuditSummary {
     `${trail.steps.length} transition${trail.steps.length === 1 ? "" : "s"} ` +
     `· generated ${trail.generatedAt}\n`,
   );
+  if (trailThesis) {
+    sections.push(renderTrailThesisSection(trailThesis, trail.steps));
+  }
   sections.push(renderStateSummary({
     newSteps,
     persistedSteps,
@@ -1003,6 +1029,50 @@ function renderStateSummary(counts: {
     `(prior verdict but step no longer in trail)`,
   );
   lines.push("");
+  return lines.join("\n");
+}
+
+function renderTrailThesisSection(
+  t: TrailThesis,
+  steps: HistoryStep[],
+): string {
+  const stepsByIndex = new Map(steps.map((s) => [s.index, s]));
+  const lines: string[] = [];
+  lines.push("## History thesis");
+  lines.push("");
+  lines.push(`**${t.headline}**`);
+  lines.push("");
+  lines.push(`_${t.subheadline}_`);
+  lines.push("");
+  lines.push(
+    `- **pattern**: \`${t.patternId}\` · ` +
+    `**confidence**: ${t.confidence} · ` +
+    `**severity**: ${t.severity} · ` +
+    `**cites**: ${t.citedIssueRefs.length} issue${t.citedIssueRefs.length === 1 ? "" : "s"} across ${t.citedStepIndices.length} step${t.citedStepIndices.length === 1 ? "" : "s"}`,
+  );
+  if (t.evidenceTopics.length > 0) {
+    lines.push(`- **topics**: ${t.evidenceTopics.slice(0, 8).join(", ")}${t.evidenceTopics.length > 8 ? ` (+${t.evidenceTopics.length - 8} more)` : ""}`);
+  }
+  if (t.arc) {
+    const early = t.arc.earlierSteps.map((i) => `#${i}`).join(", ") || "\u2014";
+    const late = t.arc.laterSteps.map((i) => `#${i}`).join(", ") || "\u2014";
+    const label = t.arc.kind === "reversal" ? "reversal" : "escalation";
+    const family = t.arc.family && t.arc.family !== "mixed" ? ` (${t.arc.family})` : "";
+    lines.push(`- **arc**: ${label}${family} · earlier: ${early} · later: ${late}`);
+  }
+  lines.push("");
+  lines.push("**Supporting citations**:");
+  for (const c of t.citedIssueRefs) {
+    const s = stepsByIndex.get(c.stepIndex);
+    const fromShort = s?.fromRef === "EMPTY" ? "EMPTY" : s?.fromRef.slice(0, 8) ?? "";
+    const date = c.authorDate.slice(0, 10);
+    lines.push(
+      `- Step ${c.stepIndex} (\`${fromShort}\` → \`${c.toShort}\`, ${date}) · ` +
+      `\`[${c.issueKind}]\` ${truncate(c.issueTitle, 130)}`,
+    );
+  }
+  lines.push("");
+  lines.push("---");
   return lines.join("\n");
 }
 

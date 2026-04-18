@@ -12,6 +12,7 @@
  */
 
 import type { HistoryReport, HistoryStep } from "./history";
+import type { TrailThesis } from "../analysis/narrative/trail";
 
 function esc(s: string): string {
   return s
@@ -179,6 +180,73 @@ export function formatHistoryIndexHtml(report: HistoryReport): string {
   }
   .step-meta .author { color: var(--text); }
 
+  /* Trail (history) thesis band */
+  .trail-thesis {
+    background: linear-gradient(180deg, var(--surface2) 0%, var(--surface) 100%);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--blue);
+    border-radius: 6px;
+    padding: 0.9rem 1.1rem;
+    margin: 1rem 0 1.25rem;
+  }
+  .trail-thesis.sev-critical { border-left-color: var(--red); }
+  .trail-thesis.sev-high     { border-left-color: var(--orange); }
+  .trail-thesis.sev-moderate { border-left-color: var(--yellow); }
+  .trail-thesis.sev-low      { border-left-color: var(--green); }
+  .trail-thesis .tt-label {
+    font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--text2); font-weight: 700;
+  }
+  .trail-thesis .tt-label .pill {
+    background: var(--surface2); color: var(--text2);
+    border: 1px solid var(--border); border-radius: 4px;
+    padding: 0.05rem 0.4rem; margin-left: 0.4rem;
+    font-size: 0.6rem; font-weight: 700;
+  }
+  .trail-thesis .tt-headline {
+    font-size: 1.05rem; font-weight: 600; color: var(--text);
+    margin-top: 0.25rem;
+  }
+  .trail-thesis .tt-sub {
+    font-size: 0.85rem; color: var(--text2);
+    margin-top: 0.2rem;
+  }
+  .trail-thesis .tt-arc {
+    display: grid; grid-template-columns: 1fr auto 1fr;
+    gap: 0.6rem; align-items: center;
+    margin-top: 0.55rem;
+    font-size: 0.78rem;
+  }
+  .trail-thesis .tt-arc .cell {
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: 4px; padding: 0.35rem 0.55rem;
+  }
+  .trail-thesis .tt-arc .arrow {
+    color: var(--blue); font-weight: 700; font-size: 1rem;
+  }
+  .trail-thesis .tt-arc .label {
+    font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--text2); margin-bottom: 0.1rem;
+  }
+  .trail-thesis .tt-cites {
+    margin-top: 0.6rem; font-size: 0.78rem; color: var(--text2);
+  }
+  .trail-thesis .tt-cites .chip {
+    display: inline-flex; align-items: center; gap: 0.25rem;
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: 999px; padding: 0.1rem 0.55rem; margin: 0.15rem 0.25rem 0.15rem 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.72rem;
+    color: var(--text); text-decoration: none;
+  }
+  .trail-thesis .tt-cites .chip:hover { border-color: var(--blue); }
+  .trail-thesis details.tt-expand {
+    margin-top: 0.55rem; font-size: 0.8rem;
+  }
+  .trail-thesis details.tt-expand summary {
+    cursor: pointer; color: var(--text2);
+  }
+  .trail-thesis details.tt-expand summary:hover { color: var(--text); }
+
   .footer {
     margin-top: 2rem; padding-top: 1rem;
     border-top: 1px solid var(--border);
@@ -218,16 +286,24 @@ export function formatHistoryIndexHtml(report: HistoryReport): string {
   </div>
   <div class="stat">
     <div class="stat-num">${thesesCount}</div>
-    <div class="stat-label">Theses fired</div>
+    <div class="stat-label">Step theses</div>
   </div>
   <div class="stat">
     <div class="stat-num">${composites}</div>
     <div class="stat-label">Composites</div>
   </div>
+  <div class="stat">
+    <div class="stat-num" title="${report.trailThesis ? esc(report.trailThesis.headline) : "no trail-level pattern earned — doctrine stayed silent"}">${report.trailThesis ? "\u2713" : "\u2014"}</div>
+    <div class="stat-label">Trail thesis</div>
+  </div>
 </div>
+
+${renderTrailThesis(report.trailThesis, report.steps)}
 
 <div class="section-title">Drift over time</div>
 ${renderChart(report.steps)}
+
+${renderConsequentialSteps(report)}
 
 <div class="section-title">Per-transition detail</div>
 <div class="steps">
@@ -240,6 +316,128 @@ ${renderChart(report.steps)}
 </div>
 </body>
 </html>`;
+}
+
+// ── Trail thesis band (Tier 1: theory) ────────────────────────────
+
+function renderTrailThesis(
+  t: TrailThesis | null,
+  steps: HistoryStep[],
+): string {
+  if (!t) return "";
+  const sev = severityBadgeClass(t.severity);
+  const conf = esc(t.confidence);
+  const headline = esc(t.headline);
+  const sub = esc(t.subheadline);
+
+  const stepsByIndex = new Map(steps.map((s) => [s.index, s]));
+
+  // Citation chips — each one links straight to the per-pair report.
+  // We cap at 12 to keep the band readable; the full list is in the
+  // <details> block below.
+  const maxChips = 12;
+  const chips = t.citedIssueRefs.slice(0, maxChips).map((c) => {
+    const s = stepsByIndex.get(c.stepIndex);
+    const href = s ? s.htmlFilename : "#";
+    const label = `#${c.stepIndex} ${c.toShort}`;
+    const title = `${c.authorDate.slice(0, 10)} — ${c.issueTitle}`;
+    return `<a class="chip" href="${esc(href)}" title="${esc(title)}">${esc(label)}</a>`;
+  }).join("");
+  const overflow = t.citedIssueRefs.length > maxChips
+    ? `<span class="chip" title="${t.citedIssueRefs.length - maxChips} more citations">+${t.citedIssueRefs.length - maxChips}</span>`
+    : "";
+
+  const arcBlock = t.arc
+    ? `
+      <div class="tt-arc">
+        <div class="cell">
+          <div class="label">${t.arc.kind === "reversal" ? "Earlier" : "Earlier cohort"}</div>
+          <div>${renderArcCell(t.arc.earlierSteps, stepsByIndex)}</div>
+        </div>
+        <div class="arrow">${t.arc.kind === "reversal" ? "\u2194" : "\u2192"}</div>
+        <div class="cell">
+          <div class="label">${t.arc.kind === "reversal" ? "Later" : "Later cohort"}</div>
+          <div>${renderArcCell(t.arc.laterSteps, stepsByIndex)}</div>
+        </div>
+      </div>` : "";
+
+  // Full citation list (collapsed by default when there are many).
+  const fullList = t.citedIssueRefs.map((c) => {
+    const s = stepsByIndex.get(c.stepIndex);
+    const href = s ? s.htmlFilename : "#";
+    return `
+      <li>
+        <a href="${esc(href)}"><code>#${c.stepIndex} ${esc(c.toShort)}</code></a>
+        <span style="color:var(--text2);">[${esc(c.issueKind)}]</span>
+        ${esc(c.issueTitle)}
+      </li>`;
+  }).join("");
+
+  return `
+<div class="trail-thesis sev-${esc(sev)}">
+  <div class="tt-label">History thesis <span class="pill">${conf} confidence</span></div>
+  <div class="tt-headline">${headline}</div>
+  <div class="tt-sub">${sub}</div>
+  ${arcBlock}
+  <div class="tt-cites">
+    <span style="font-weight:600; color:var(--text);">Supporting:</span>
+    ${chips}${overflow}
+  </div>
+  <details class="tt-expand">
+    <summary>All ${t.citedIssueRefs.length} cited issue${t.citedIssueRefs.length === 1 ? "" : "s"}</summary>
+    <ul style="margin-top:0.35rem; padding-left:1.1rem;">${fullList}</ul>
+  </details>
+</div>`;
+}
+
+function renderArcCell(
+  stepIndices: number[],
+  stepsByIndex: Map<number, HistoryStep>,
+): string {
+  if (stepIndices.length === 0) return "\u2014";
+  return stepIndices.slice(0, 6).map((idx) => {
+    const s = stepsByIndex.get(idx);
+    if (!s) return `#${idx}`;
+    return `<a href="${esc(s.htmlFilename)}" title="${esc(s.commitSubject)}"><code>#${idx} ${esc(s.toShort)}</code></a>`;
+  }).join(", ") + (stepIndices.length > 6 ? `, +${stepIndices.length - 6} more` : "");
+}
+
+// ── Consequential steps (Tier 2: strongest accusations) ─────────────
+
+/**
+ * Short list of the handful of steps that carry the most weight. Pulls
+ * from trail thesis citations first, then backfills by score. Keeps the
+ * main body of the page focused — reviewers see theory → accusation →
+ * proof, in that order, rather than scrolling straight into the flat
+ * step list.
+ */
+function renderConsequentialSteps(report: HistoryReport): string {
+  if (report.steps.length <= 3) return ""; // small trail: full list is enough
+
+  const scored: Array<{ s: HistoryStep; w: number }> = [];
+  const citedSet = new Set(
+    (report.trailThesis?.citedStepIndices ?? []),
+  );
+
+  for (const s of report.steps) {
+    let w = s.score;
+    if (citedSet.has(s.index)) w += 5; // citations earn priority
+    if (s.thesis) w += 2;
+    scored.push({ s, w });
+  }
+  scored.sort((a, b) => b.w - a.w);
+  const pick = scored.slice(0, Math.min(5, Math.max(3, Math.ceil(report.steps.length / 8))));
+  if (pick.length === 0) return "";
+
+  const rows = pick
+    .map((p) => p.s)
+    .sort((a, b) => a.index - b.index)
+    .map(renderStep)
+    .join("");
+
+  return `
+<div class="section-title">Most consequential steps</div>
+<div class="steps">${rows}</div>`;
 }
 
 // ── Drift chart (inline SVG bars) ─────────────────────────────────

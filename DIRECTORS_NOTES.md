@@ -18,6 +18,8 @@ The core analysis engine in `src/analysis/` is shared between both surfaces. It 
 
 **Persistent judgment memory (v0.7.2):** `samediff audit` preserves reviewer verdicts across reruns at two grains — step and per-finding — in a schema-v2 `verdicts.json` sidecar living next to `audit.md`. Identity is the foundation: step identity is `sha256(fromRef || toRef || filePath)`; per-finding identity is a fingerprint of the *semantic core only* (kind + normalized evidence), deliberately excluding engine-labelled metadata (triggers, reason tag, confidence) so "same meaning → same fingerprint" survives detector retuning. If the evidence itself shifts, the fingerprint shifts, the old finding is retained in `orphanedFindings` with its verdict preserved, and the new finding is marked `[NEW]`; the step gets a `[DRIFTED]` badge and prior step-level verdicts are carried forward with a `re-review recommended` flag rather than silently rubber-stamped. The roundtrip is markdown-first: reviewers edit `**verdict**`/`**note**`/`**finding-verdicts**` slots in `audit.md` (per-finding overrides keyed by `{f:<12-hex>}` display id); rerun `samediff audit` harvests, persists, and re-renders with `*(carried from YYYY-MM-DD)*` annotations. Orphaned transitions (stepKey no longer in trail) are retained in `verdicts.json#orphanedSteps` so a spec rewrite can't silently drop last quarter's FP judgments. v1 stores migrate transparently on first read. observe → judge → preserve judgment, not observe → forget → repeat.
 
+**Trail-level thesis (v0.8):** `src/analysis/narrative/trail/` is a longitudinal layer above the pairwise macro thesis — "what happened across this document's lifetime" rather than "what drifted in this single diff." Same anti-hallucination contract: headlines come from a fixed catalog of doctrine patterns (`guarantees-restored-after-relaxation`, `syntax-contract-reversed`, `compliance-boundary-narrowed`, `operational-guarantees-broadly-weakened`, `policy-progressively-softened`, `severity-downgraded-systematically`, `rollout-mode-persistent`, `ownership-drift`); the subheadline is the only synthesised text and fills slots from cited step metadata + issue subjects verbatim. Conservative threshold is enforced at two grains: each pattern has its own floor (usually ≥3 same-kind issues across ≥2 steps) AND a pipeline-level earned check (arc-shaped firings need ≥1 issue per half AND ≥2 distinct steps; flat firings need ≥3 issues across ≥2 steps). Every thesis cites real `issue-id` values from real steps — the hierarchy `finding → issue → thesis` never skips a level, even at trail grain. Renderer placement in the history index: Tier 1 thesis band → drift chart → "Most consequential steps" cluster (cited + high-score) → full per-transition list. `audit.md` gets a matching `## History thesis` section above the state summary. When no pattern earns, the layer stays silent and the per-step views carry the report. Dogfood hits: DIRECTORS_NOTES fires a real `syntax-contract-reversed` on the file:// URI flip arc; `text/3698-declarative-derive-macros.md` fires `syntax-contract-reversed` on an unsafe flip; `text/1946-intra-rustdoc-links.md` stays silent (consistent with the user's prior assessment — incremental clarification doesn't earn a macro headline); `08-policy-drift` stays silent (the engine reads most of its drift as additive tightening / demoted contradictions, not weakenings — honest conservative behavior).
+
 **Working surfaces:**
 - CLI: `./samediff left.md right.md` (auto-builds if stale)
 - CLI multi-file: `./samediff dir <left-dir> <right-dir>` (one aggregated report across many files)
@@ -73,9 +75,169 @@ Three example shapes, all driven by `examples/generate.sh`:
   picks up the worst-score `stat-num` class the same way it does for
   the other shapes.
 
-**Test counts:** 28 engine tests + 112 CLI integration tests + 24 PR-reviewer tests + 23 narrative tests + 11 multi-file tests + 13 source-diff tests + 11 macro-thesis tests + 21 history+scan+audit tests, all passing (243 total)
+**Test counts:** 28 engine tests + 112 CLI integration tests + 24 PR-reviewer tests + 23 narrative tests + 11 multi-file tests + 13 source-diff tests + 11 macro-thesis tests + 21 history+scan+audit tests + 19 trail-thesis tests, all passing (262 total)
 
 ## Devlog
+
+### 2026-04-18 — Claude Opus 4.7 — Trail-level thesis (longitudinal truth)
+
+Landed `src/analysis/narrative/trail/` — the layer that answers
+"what actually happened across this document's lifetime?" without
+skipping the finding → issue → thesis hierarchy. Same anti-
+hallucination contract as the pairwise macro layer (fixed catalog,
+cited-issue provenance, templated subheadline only), extended
+across time.
+
+**The doctrine catalog (fixed headlines only):**
+- `guarantees-restored-after-relaxation` — weakened then restored
+  (the strongest signal — arc shape overwhelms count)
+- `syntax-contract-reversed` — later flip restores an earlier form
+  (A→B then B→A detected by normalised token overlap across rename
+  / commitment-reversal / policy-reversal kinds)
+- `severity-downgraded-systematically` — ≥3 severity-downgrade
+  issues spanning ≥2 steps
+- `compliance-boundary-narrowed` — ≥3 compliance weakenings, no
+  compensating tightening
+- `policy-progressively-softened on <family>` — monotone family
+  softening, ≥3 issues / ≥2 steps
+- `operational-guarantees-broadly-weakened` — weakenings across
+  ≥2 families / ≥2 steps (defers to the reversal detector when
+  any family restored)
+- `rollout-mode-persistent` — staging-deferral lexicon in ≥2 steps
+  still present in the later half
+- `ownership-drift` — distinct author cohorts for significant
+  (severity ≥ moderate AND substantive) steps in the earlier vs
+  later half of the trail, fully disjoint
+
+**Clustering that preserves the hierarchy.** Each per-step
+narrative contributes its full `issues + quiet` list (not just
+top). The trail layer reclassifies each issue by
+`(family, direction)` using the same topic sets and direction
+rules the pairwise macro layer uses, then buckets by step index
+to make arc detection cheap. A topic that sits in multiple
+families (e.g. `audit ∈ {reliability, compliance}`) appears in
+both buckets so cross-family reversals are detectable. An
+important extension for the trail grain: `isSubstantive` counts
+observations that carry a `contradiction:` trigger prefix as
+substantive signal. The pairwise layer demotes mixed-subject
+negation flips to quiet because a single one is usually noise
+inside a diff; across the trail, the *repetition* is the signal
+and reinstating them loses nothing (low-confidence observations
+still get filtered).
+
+**Earned threshold, twice.** Each pattern enforces its own floor
+(inside its evaluator). On top of that, `buildTrailThesis`
+enforces a uniform second floor: arc-shaped firings need ≥1
+issue per half AND ≥2 distinct cited steps; flat firings need
+≥3 issues across ≥2 distinct steps. This is the conservative
+bias the user specified ("err toward under-firing"). Two weak
+events pretending to be a narrative can't slip through.
+
+**Renderer placement — theory → accusation → proof.** The
+history HTML index now opens with a trail-thesis band (gradient
+background, severity-coloured left border, citation chips that
+link to per-pair reports + an `<details>` of the full cited
+list), followed by the drift chart, followed by a new "Most
+consequential steps" cluster (cited steps + high-scoring steps,
+up to 5), followed by the full per-transition list. Same shape
+in `audit.md`: `## History thesis` section above the state
+summary, with pattern id, confidence, severity, arc breakdown,
+and supporting citations enumerated as markdown list items.
+
+**Dogfood across three targets:**
+
+| target                                  | trail-thesis fire | notes                                                             |
+|-----------------------------------------|-------------------|-------------------------------------------------------------------|
+| `DIRECTORS_NOTES.md` (28 transitions)   | `syntax-contract-reversed` — 3 citations across steps 6/17/18 | real file:// URI flip arc, real catalog match |
+| `text/3698-declarative-derive-macros.md` (42 transitions) | `syntax-contract-reversed` — 2 citations, steps 33/35 | unsafe flip, low confidence but earned |
+| `text/1946-intra-rustdoc-links.md` (14 transitions) | silent | consistent with prior assessment; incremental clarification doesn't earn a macro headline |
+| `08-policy-drift/policy.md` (7 transitions) | silent | engine reads drift as additive tightening + demoted contradictions; trail layer honestly stays silent |
+| `06-secure-gateway-doc-drift` (pairwise) | n/a (not history) | pairwise thesis unchanged: "Compliance boundary weakened" |
+
+**19 new tests** in `tools/trail-thesis.test.mjs`:
+- catalog completeness + pattern id uniqueness
+- empty / single-step / two-weak trails stay silent
+- ≥3 same-family weakenings fire with a catalog-conformant headline
+- reversal arc fires when a family weakens then tightens
+- reversal requires restore AFTER weakening (not before)
+- syntax-contract-reversed fires when A→B then B→A
+- ownership-drift fires on fully disjoint author cohorts in disjoint halves
+- every cited `(stepIndex, issueId)` resolves to a real Issue
+- evidence topics appear verbatim in some cited issue's subject
+- HTML band renders when a thesis fires (and not when it doesn't)
+- "Most consequential steps" cluster renders on long-enough trails
+- `trail.json` carries the `trailThesis` field (null or object)
+- `audit.md` includes `## History thesis` when fired
+- 08-policy-drift either fires a catalog pattern or stays silent
+  (headline must be from the fixed catalog either way)
+- whatever fires on DIRECTORS_NOTES has a catalog-conformant
+  headline AND subheadline follows the constrained template
+
+**Case-sensitivity bug caught + locally patched.** Topic sets in
+`macro/topicCategories.ts` mix uppercase entries (`TLS`, `SSL`,
+`GDPR`, `PII`, `SLA`) with lowercase ones. The pairwise macro
+layer lowercases subjects before the `.has()` check, so
+uppercase topics silently never match. Latent bug — I didn't fix
+the pairwise layer (out of scope, different contract) but the
+trail layer normalises its own lowercased copy of the imported
+sets so TLS-on-TLS classification works. Filed as deferred: the
+pairwise macro layer has the same latent bug and only hits it
+on ~5 topics, all of which happen to be backed by other
+(lowercase) aliases in practice. Worth cleaning up, but
+separately.
+
+**Design decisions worth recording:**
+- Trail thesis lives on `HistoryReport.trailThesis` — computed
+  once in `runHistory`, persisted in `trail.json`, consumed by
+  both the HTML renderer and (after re-analysing) the audit
+  path. Downstream tools can read it directly from
+  `trail.json` without re-running the engine.
+- Trail layer consumes per-step `issues + quiet`, not just
+  `top`. Trail-level patterns (progressive softening, rollout
+  persistence) should see below-the-fold signal the pairwise
+  headline suppressed.
+- The subheadline template is intentionally ugly: `Across N
+  steps spanning YYYY-MM-DD → YYYY-MM-DD — driven by topic,
+  topic, topic (+N more)`. Ugly = honest. It doesn't pretend
+  to be prose; it lists evidence.
+- Arc vs flat shape is a first-class distinction in the model
+  (`TrailArc` with `earlierSteps` / `laterSteps` / `family`),
+  not a template trick. The renderer can show the reversal
+  explicitly as an arrow between two columns of step links —
+  the user gets to see the reversal geometry without reading
+  prose.
+- Catalog headlines for atom-shaped patterns substitute the
+  family into the string (`Policy progressively softened on
+  security`). Family is pulled verbatim from the classifier's
+  `ALL_FAMILIES` array, so the substitution is reviewable
+  ahead of time (one of 4 values, all in the catalog's
+  `TRAIL_HEADLINES` set).
+
+**Deferred (not built):**
+- Trail-thesis persistence / verdict memory. The trail thesis
+  is recomputed on every `audit` run; reviewer judgment on the
+  thesis itself isn't preserved across reruns yet. Would
+  require a fingerprint-like identity on thesis (pattern id +
+  cited citation set?) and a slot in `verdicts.json`.
+- Trail-thesis diffing between runs. The data is there
+  (previous `trailThesis` in prior `trail.json`) but there's
+  no "last run fired X, this run fires Y" narrative.
+- Ownership-drift signal accuracy. Commit author is a proxy
+  for decision-maker at best. The honest conservative
+  threshold (disjoint cohorts, ≥2 per half) catches the
+  strongest cases without claiming to read intent — anything
+  more specific would need structured role attribution the
+  engine doesn't have.
+- 08-policy-drift wants to fire but can't — most of its drift
+  reads as concept churn, not weakening. Improving that would
+  mean engine work (better subject extraction, more generous
+  contradiction pairing). Not done here; the trail layer's
+  silence on it is honest given current engine behavior.
+
+Trust infrastructure first. The foundation is the hierarchy:
+finding → issue → thesis. The trail layer extends it across
+time without adding a new shortcut. Score assists triage; it
+does not define truth.
 
 ### 2026-04-18 — Claude Opus 4.7 — `samediff-audit` cantrip + Rust RFC dogfood
 

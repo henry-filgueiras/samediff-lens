@@ -16,6 +16,11 @@ import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import { analyzeTextPair } from "../analysis/analyzeTextPair";
 import { buildNarrative, type Thesis } from "../analysis/narrative";
+import {
+  buildTrailThesis,
+  type TrailThesis,
+  type StepNarrativeInput,
+} from "../analysis/narrative/trail";
 import { buildDiffResult } from "./resultModel";
 import { formatHtmlReport } from "./formatHtml";
 import { formatHistoryIndexHtml } from "./formatHistoryHtml";
@@ -71,6 +76,14 @@ export type HistoryReport = {
   generatedAt: string;
   /** True if the first step is an EMPTY → first-commit baseline. */
   includesEmptyBaseline: boolean;
+  /**
+   * Trail-level thesis — the "history thesis" layer. Non-null only when
+   * a fixed-catalog pattern is earned (≥3 cited issues from ≥2 steps, or
+   * an explicit reversal arc). Synthesises meaning across the document's
+   * lifetime without bypassing the per-step issues that support it.
+   * See src/analysis/narrative/trail/ for the doctrine.
+   */
+  trailThesis: TrailThesis | null;
 };
 
 export type RunHistoryOptions = {
@@ -103,9 +116,16 @@ export function runHistory(opts: RunHistoryOptions): HistoryReport {
   mkdirSync(opts.outDir, { recursive: true });
   const fileBase = basename(opts.filePath);
   const steps: HistoryStep[] = [];
+  const trailInputs: StepNarrativeInput[] = [];
+
+  const produceStep = (args: BuildStepArgs) => {
+    const built = buildStep(args);
+    steps.push(built.step);
+    trailInputs.push(built.trailInput);
+  };
 
   if (includeEmpty) {
-    steps.push(buildStep({
+    produceStep({
       index: 0,
       fromRef: "EMPTY",
       fromShort: "EMPTY",
@@ -114,12 +134,12 @@ export function runHistory(opts: RunHistoryOptions): HistoryReport {
       cwd: opts.cwd,
       outDir: opts.outDir,
       fileBase,
-    }));
+    });
   }
 
   for (let i = 0; i < commits.length - 1; i++) {
     const idx = includeEmpty ? i + 1 : i;
-    steps.push(buildStep({
+    produceStep({
       index: idx,
       fromRef: commits[i].hash,
       fromShort: commits[i].short,
@@ -128,8 +148,10 @@ export function runHistory(opts: RunHistoryOptions): HistoryReport {
       cwd: opts.cwd,
       outDir: opts.outDir,
       fileBase,
-    }));
+    });
   }
+
+  const trailThesis = buildTrailThesis(trailInputs);
 
   const report: HistoryReport = {
     filePath: opts.filePath,
@@ -137,6 +159,7 @@ export function runHistory(opts: RunHistoryOptions): HistoryReport {
     steps,
     generatedAt: new Date().toISOString(),
     includesEmptyBaseline: includeEmpty,
+    trailThesis,
   };
 
   writeFileSync(join(opts.outDir, "trail.json"), JSON.stringify(report, null, 2));
@@ -158,7 +181,7 @@ type BuildStepArgs = {
   fileBase: string;
 };
 
-function buildStep(args: BuildStepArgs): HistoryStep {
+function buildStep(args: BuildStepArgs): { step: HistoryStep; trailInput: StepNarrativeInput } {
   const fromText = args.fromRef === "EMPTY"
     ? ""
     : readAtRef(args.fromRef, args.filePath, args.cwd);
@@ -184,7 +207,7 @@ function buildStep(args: BuildStepArgs): HistoryStep {
   });
   writeFileSync(join(args.outDir, htmlFilename), html);
 
-  return {
+  const step: HistoryStep = {
     index: args.index,
     fromRef: args.fromRef,
     toRef: args.toCommit.hash,
@@ -206,6 +229,25 @@ function buildStep(args: BuildStepArgs): HistoryStep {
     totalFindings: diff.counts.total,
     htmlFilename,
   };
+
+  // Trail-thesis input: full issue fidelity (top + quiet) so the
+  // longitudinal clustering can see every substantive signal, not
+  // just the per-step headline. Issue ids are namespaced by step
+  // index so citations remain unique across the trail.
+  const trailInput: StepNarrativeInput = {
+    stepIndex: args.index,
+    fromRef: args.fromRef,
+    toRef: args.toCommit.hash,
+    toShort: args.toCommit.short,
+    authorName: args.toCommit.author,
+    authorDate: args.toCommit.date,
+    commitSubject: args.toCommit.subject,
+    severity: diff.score.label,
+    score: diff.score.value,
+    issues: [...narrative.issues, ...narrative.quiet],
+  };
+
+  return { step, trailInput };
 }
 
 function summariseThesis(t: Thesis): ThesisSummary {
