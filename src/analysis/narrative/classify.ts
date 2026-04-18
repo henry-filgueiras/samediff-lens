@@ -41,7 +41,52 @@ export type ClassifiedFinding = {
    */
   taskTransition?: TaskStatusChangeFinding["transition"];
   taskSubject?: string;
+  /**
+   * Severity-downgrade word pair. Set when classifier detects a
+   * harsh-consequence → soft-consequence shift (error → warning,
+   * fatal → advisory, reject → ignore, etc.). The title template
+   * uses these labels verbatim.
+   */
+  severityHarsh?: string;
+  severitySoft?: string;
 };
+
+// ── Severity-downgrade detection ──────────────────────────────────
+// Paired lexicon of harsh consequence terms and the soft replacements
+// they tend to drift toward. When a finding's BEFORE matches a harsh
+// pattern AND its AFTER matches the corresponding soft pattern AND the
+// harsh term is *gone* from AFTER, it's a severity downgrade. Catches
+// the common "error → warning" and "fatal → advisory" diff patterns
+// that the engine would otherwise frame as policy reversals.
+const SEVERITY_PAIRS: Array<[harsh: RegExp, soft: RegExp, harshLabel: string, softLabel: string]> = [
+  [/\berrors?\b/i,                /\b(warning|warn|warns|notice|advisory|hint)s?\b/i, "error",   "warning"],
+  [/\bfatal\b/i,                  /\b(soft|warning|advisory|recoverable)\b/i,         "fatal",   "soft"],
+  [/\b(fail|fails|failure|fails?)\b/i, /\b(skip|skips|skipped|ignore|ignores|ignored|warn|warns|warning)\b/i, "fail", "skip"],
+  [/\b(block|blocks|blocked|blocking)\b/i, /\b(advisory|warn|warns|warning|notice|allow|allows|allowed)\b/i, "block", "advisory"],
+  [/\b(reject|rejects|rejected)\b/i, /\b(warn|warns|warning|ignore|ignores|allow|allows|accept|accepts)\b/i,  "reject", "warn"],
+  [/\b(crash|crashes|crashed)\b/i,  /\b(log|logs|logged|warn|warns|recover|recovers|recovered)\b/i,            "crash",  "log"],
+  [/\b(abort|aborts|aborted)\b/i,   /\b(retry|retries|continue|continues|warn|warns|recover|recovers)\b/i,    "abort",  "continue"],
+  [/\b(panic|panics|panicked)\b/i,  /\b(recover|recovers|recovered|warn|warns|return|returns)\b/i,            "panic",  "recover"],
+  [/\bdeny|denies|denied\b/i,       /\b(warn|warns|allow|allows|accept|accepts)\b/i,                          "deny",   "warn"],
+];
+
+type SeverityShift = { harsh: string; soft: string };
+
+export function detectSeverityDowngrade(
+  before: string | null | undefined,
+  after: string | null | undefined,
+): SeverityShift | null {
+  if (!before || !after) return null;
+  for (const [h, s, hLabel, sLabel] of SEVERITY_PAIRS) {
+    // Must be present in BEFORE, present in AFTER, AND gone from AFTER
+    // (if both still contain the harsh word, it didn't downgrade — it
+    // was rephrased or expanded).
+    if (h.test(before) && s.test(after) && !h.test(after)) {
+      return { harsh: hLabel, soft: sLabel };
+    }
+  }
+  return null;
+}
 
 export function classifyAll(diff: DiffResult): ClassifiedFinding[] {
   const out: ClassifiedFinding[] = [];
@@ -78,14 +123,20 @@ function classifyCommitmentShift(f: CommitmentShiftFinding, index: number): Clas
   else if (t.includes("adds operational detail")) kind = "constraint-introduced";
   else if (t.includes("changes the implied contract")) kind = "observation";
 
+  // Severity downgrade overrides — "rustdoc should give an error" →
+  // "rustdoc should give a warning" reads as "Severity downgraded:
+  // error → warning", not "commitment weakened" or "implied contract".
+  const sev = detectSeverityDowngrade(f.evidence.before, f.evidence.after);
   return {
     ref: { category: "commitment-shift", index },
-    kind,
+    kind: sev ? "severity-downgraded" : kind,
     before: f.evidence.before,
     after: f.evidence.after,
     triggers: t,
     anchors: f.provenance?.anchors ?? [],
     confidence: "medium",
+    severityHarsh: sev?.harsh,
+    severitySoft: sev?.soft,
   };
 }
 
@@ -98,6 +149,34 @@ function classifyContradiction(f: ContradictionFinding, index: number): Classifi
     case "narrowing":              kind = "scope-narrowed"; break;
     default:                       kind = "observation";
   }
+
+  // Severity-downgrade override: when the contradiction's polarity
+  // flip is really a harsh→soft consequence shift (error → warning,
+  // reject → ignore), framing it as "policy reversed" obscures the
+  // actual operational story. Severity-downgraded survives the
+  // weak-anchor demotion below — a downgrade is meaningful regardless
+  // of how many words the two sentences happen to share.
+  const sev = detectSeverityDowngrade(f.evidence.before, f.evidence.after);
+  if (sev) {
+    kind = "severity-downgraded";
+  } else {
+    // Weak-contradiction demotion: when a non-high-confidence
+    // contradiction has only 1-2 strong shared anchors, the engine
+    // probably paired two sentences that share generic words rather
+    // than a real subject. Demoting these to "observation" keeps them
+    // findable in the quiet bucket but stops them from headlining.
+    //
+    // Empirical: dogfood-auditing text/1946-intra-rustdoc-links.md
+    // produced a steady stream of FPs (steps 3, 4, 5, 6, 7, 10) that
+    // all fit this shape. Real legitimate contradictions (e.g.
+    // example 06's same-section Performance reversal) clear the floor
+    // because they share 3+ topic-bearing tokens.
+    const anchorCount = f.evidence.anchors.length;
+    if (f.confidence !== "high" && anchorCount < 3) {
+      kind = "observation";
+    }
+  }
+
   return {
     ref: { category: "contradiction", index },
     kind,
@@ -106,18 +185,25 @@ function classifyContradiction(f: ContradictionFinding, index: number): Classifi
     triggers: [`contradiction:${f.reason}`],
     anchors: f.provenance?.anchors ?? [],
     confidence: f.confidence,
+    severityHarsh: sev?.harsh,
+    severitySoft: sev?.soft,
   };
 }
 
 function classifyRename(f: ConceptRenameFinding, index: number): ClassifiedFinding {
+  // Renames like "issue an error" → "issue a warning" are textbook
+  // severity downgrades. Detect on the from/to strings directly.
+  const sev = detectSeverityDowngrade(f.from, f.to);
   return {
     ref: { category: "concept-rename", index },
-    kind: "rename",
+    kind: sev ? "severity-downgraded" : "rename",
     before: f.from,
     after: f.to,
     triggers: f.note ? [f.note] : [],
     anchors: f.provenance?.anchors ?? [],
     confidence: f.confidence,
+    severityHarsh: sev?.harsh,
+    severitySoft: sev?.soft,
   };
 }
 

@@ -21,6 +21,7 @@ export type IssueKind =
   | "commitment-reversal"       // required ↔ optional flip
   | "policy-reversal"           // negation flip (permitted → forbidden, etc.)
   | "guarantee-removed"         // audit/logging/durability removed or weakened
+  | "severity-downgraded"       // error → warning, fatal → advisory, etc.
   | "constraint-introduced"     // rate limit, cap, new mandatory field
   | "commitment-strengthening"  // should → must
   | "commitment-weakening"      // must → should

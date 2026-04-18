@@ -62,9 +62,95 @@ The core analysis engine in `src/analysis/` is shared between both surfaces. It 
 **Example spectrum (examples/):**
 01-modal-shift → 02-todo-drift → 03-api-contract → 04-prompt-policy → 05-hydra-doc-drift
 
-**Test counts:** 28 engine tests + 112 CLI integration tests + 24 PR-reviewer tests + 19 narrative tests + 11 multi-file tests + 13 source-diff tests + 11 macro-thesis tests + 12 history+scan+audit tests, all passing (230 total)
+**Test counts:** 28 engine tests + 112 CLI integration tests + 24 PR-reviewer tests + 23 narrative tests + 11 multi-file tests + 13 source-diff tests + 11 macro-thesis tests + 12 history+scan+audit tests, all passing (234 total)
 
 ## Devlog
+
+### 2026-04-18 — Claude Opus 4.7 — Severity-downgraded kind + weak-contradiction demotion
+
+Two narrative-quality fixes from the RFC dogfood audit:
+
+**1. New `severity-downgraded` IssueKind.** RFC step 11
+(`error → warning` across the whole doc) was getting headlined as
+"Policy reversed", which obscured the actual operational story:
+strict enforcement was downgraded to advisory enforcement.
+
+Added detection in `classify.ts` via a paired harsh/soft consequence
+lexicon: `error → warning`, `fatal → soft`, `fail → skip`,
+`block → advisory`, `reject → ignore`, `crash → log`,
+`abort → continue`, `panic → recover`, `deny → warn`. Detector
+fires when BEFORE matches a harsh pattern, AFTER matches the
+corresponding soft pattern, AND the harsh term is *gone* from
+AFTER (so "fatal error in foo → fatal error in bar" doesn't
+falsely fire).
+
+Detection runs across three classifier paths:
+- `classifyContradiction` — overrides the contradiction-reason
+  mapping when a downgrade is detected, AND survives the new
+  weak-contradiction demotion (severity matters even with weak
+  anchors).
+- `classifyCommitmentShift` — overrides the trigger-based mapping.
+- `classifyRename` — overrides the default `rename` kind. The RFC
+  step 11 actually fires through the rename path because the
+  surrounding sentence text was identical.
+
+KIND_WEIGHT 7 (same tier as `guarantee-removed` — losing strict
+enforcement is a real promise broken). Marked as `weakening`
+direction so it counts toward security/compliance/reliability
+atomic themes in the macro layer.
+
+Title template: `Severity downgraded on {subject}: {harsh} →
+{soft}`. Words are pulled verbatim from the lexicon match.
+
+**2. Weak-contradiction demotion.** Steps 3, 4, 5, 6, 7, 10 of the
+RFC audit each had 1-3 false-positive policy-reversal headlines
+where the engine paired unrelated same-section sentences sharing
+only generic words (`pre`, `suffix`, `space`, `@`).
+
+Fix in `classifyContradiction`: when a contradiction has fewer than
+3 strong shared anchors AND confidence isn't `high`, demote its
+kind to `observation` (which routes it to the quiet bucket). Engine
+still emits the contradiction; we just refuse to headline it.
+
+Real same-subject contradictions like example 06's Performance
+reversal share 3+ topic-bearing tokens (performance / latency /
+overhead) and clear the floor. Severity downgrades short-circuit
+this check (a downgrade headline is meaningful even with weak
+lexical overlap).
+
+**Audit cwd fix.** Recorded `gitRoot` in `trail.json` so
+`samediff audit /tmp/some-trail` works from any directory, not just
+the repo the trail was generated in. Falls back to cwd for trails
+generated before the field existed.
+
+**Resulting RFC audit** (text/1946-intra-rustdoc-links.md):
+
+| step | before | after |
+|---|---|---|
+| 3 | Policy reversed (FP) | — *(demoted to quiet)* |
+| 4 | Policy reversed (FP) | — *(demoted to quiet)* |
+| 5 | Policy reversed (FP) | — *(demoted to quiet)* |
+| 6 | Policy reversed (FP) | — *(demoted to quiet)* |
+| 7 | Policy reversed (FP) | — *(demoted to quiet)* |
+| 10 | Policy reversed on @ | — *(demoted to quiet)* |
+| 11 | Policy reversed | **Severity downgraded: error → warning** |
+
+8 of 14 RFC transitions are now silent or accurate; 1 has the
+right severity-downgrade framing; 1 has a strong commitment-shift
+signal (step 8). All canonical examples 01-07 unchanged.
+
+**Tests** — 4 new in `tools/narrative.test.mjs`:
+- error→warning across multiple sentences fires severity-downgraded
+- severity downgrade does NOT fire when harsh word persists in AFTER
+- multi-sentence error→warning surfaces severity-downgraded via
+  whichever classifier path the engine picks
+- weak same-section contradictions (≤2 anchors, low/medium conf)
+  do NOT appear as TOP issues
+
+KIND_WEIGHT updated in three parallel locations
+(`buildNarrative.ts`, `multiFile.ts`, `macro/buildMacro.ts`) — the
+existing comment in `multiFile.ts` flagged this as a known
+duplication risk.
 
 ### 2026-04-18 — Claude Opus 4.7 — `samediff audit` (per-step signal/noise judgment)
 

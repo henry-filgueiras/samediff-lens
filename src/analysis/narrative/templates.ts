@@ -119,6 +119,23 @@ export function titleScopeNarrowed(before: string, after: string): string {
     : `Scope narrowed: ${delta}`;
 }
 
+/**
+ * Severity downgrade title — uses the matched harsh/soft word pair
+ * verbatim. Subject (extracted from evidence) names what the
+ * downgrade applies to: "Severity downgraded on auth: error → warning".
+ */
+export function titleSeverityDowngraded(
+  harsh: string,
+  soft: string,
+  before: string,
+  after: string,
+): string {
+  const subj = extractSubject(before, after);
+  return subj
+    ? `Severity downgraded on ${subj}: ${harsh} \u2192 ${soft}`
+    : `Severity downgraded: ${harsh} \u2192 ${soft}`;
+}
+
 export function titleTaskShift(added: boolean, desc: string): string {
   return added ? `Task added: ${shortPhrase(desc, 85)}` : `Task removed: ${shortPhrase(desc, 85)}`;
 }

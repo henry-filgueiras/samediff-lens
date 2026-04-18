@@ -172,6 +172,7 @@ function issueSalience(issue: Issue): number {
     "commitment-reversal": 9,
     "policy-reversal": 8,
     "guarantee-removed": 7,
+    "severity-downgraded": 7,
     "constraint-introduced": 6,
     "commitment-strengthening": 5,
     "commitment-weakening": 5,

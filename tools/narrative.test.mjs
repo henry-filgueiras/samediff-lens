@@ -422,6 +422,102 @@ test("checklist: TODO without checkbox is treated as open (matches across syntac
   });
 });
 
+// ── severity-downgraded: error → warning class ─────────────────────────────
+
+test("error → warning across the doc surfaces as severity-downgraded, not policy-reversed", () => {
+  // The dogfood case from auditing 1946-intra-rustdoc-links.md: a doc-wide
+  // `error → warning` downgrade should read as "Severity downgraded: error
+  // → warning", not as "Policy reversed".
+  const left = [
+    "If a disambiguator does not match, rustdoc should issue an error.",
+    "If a public item links to a private one, rustdoc should give an error.",
+    "Non-disambiguated paths cannot be used to link to macros.",
+  ].join("\n") + "\n";
+  const right = [
+    "If a disambiguator does not match, rustdoc should issue a warning.",
+    "If a public item links to a private one, rustdoc should give a warning.",
+    "Non-disambiguated paths cannot be used to link to macros.",
+  ].join("\n") + "\n";
+  withTempPair(left, right, (lp, rp) => {
+    const r = runJson(lp, rp);
+    const all = [...r.narrative.issues, ...r.narrative.quiet];
+    const downgrades = all.filter((i) => i.kind === "severity-downgraded");
+    assert.ok(
+      downgrades.length > 0,
+      `expected at least one severity-downgraded issue; got kinds: ${all.map((i) => i.kind).join(", ")}`,
+    );
+    assert.match(
+      downgrades[0].title,
+      /Severity downgraded.*error.*\u2192.*warning/,
+      `expected "Severity downgraded: error → warning" framing; got: ${downgrades[0].title}`,
+    );
+  });
+});
+
+test("severity-downgraded fires from any classifier path (mirrors RFC step 11)", () => {
+  // Mirrors the dogfood case from text/1946-intra-rustdoc-links.md
+  // step 11: a doc-wide "error -> warning" downgrade across multiple
+  // sentences. The classifier should reframe whichever finding the
+  // engine emits (rename, commitment-shift, or contradiction) as
+  // severity-downgraded, not the generic kind.
+  const left = [
+    "If a disambiguator does not match, rustdoc should issue an error.",
+    "If a public item links to a private one, rustdoc should give an error.",
+    "If a private item links to another private item, no error should be emitted.",
+  ].join("\n") + "\n";
+  const right = [
+    "If a disambiguator does not match, rustdoc should issue a warning.",
+    "If a public item links to a private one, rustdoc should give a warning.",
+    "If a private item links to another private item, no warning should be emitted.",
+  ].join("\n") + "\n";
+  withTempPair(left, right, (lp, rp) => {
+    const r = runJson(lp, rp);
+    const all = [...r.narrative.issues, ...r.narrative.quiet];
+    assert.ok(
+      all.some((i) => i.kind === "severity-downgraded"),
+      `expected severity-downgraded across multi-sentence error->warning; got kinds: ${all.map((i) => i.kind).join(", ")}`,
+    );
+  });
+});
+
+test("severity-downgraded does NOT fire when both sides keep the harsh word", () => {
+  // "fatal error in foo" → "fatal error in bar" is just a subject
+  // change, not a downgrade. The detector requires the harsh word to
+  // be GONE from after for the downgrade to count.
+  const left = "A fatal error occurs in module foo.\n";
+  const right = "A fatal error occurs in module bar.\n";
+  withTempPair(left, right, (lp, rp) => {
+    const r = runJson(lp, rp);
+    const all = [...r.narrative.issues, ...r.narrative.quiet];
+    assert.ok(
+      !all.some((i) => i.kind === "severity-downgraded"),
+      "must not flag severity-downgraded when harsh word persists",
+    );
+  });
+});
+
+// ── Weak contradiction demotion ────────────────────────────────────────────
+
+test("weak same-section contradictions (≤2 anchors, low/medium conf) get demoted to quiet", () => {
+  // Two sentences sharing only generic words shouldn't headline as a
+  // policy reversal even if they trigger the negation-flip detector.
+  // This mirrors the FP class from the RFC audit (steps 3-7, 10).
+  const left  = "You can use a space instead of the @ symbol.\n";
+  const right = "You can also use a function@ prefix as an alternative.\n";
+  withTempPair(left, right, (lp, rp) => {
+    const r = runJson(lp, rp);
+    // If a contradiction even fires (it might not, with the engine
+    // strip), it must NOT be promoted to TOP. Quiet bucket only.
+    const topPolicy = r.narrative.issues.filter(
+      (i) => i.kind === "policy-reversal" || i.kind === "scope-narrowed",
+    );
+    assert.equal(
+      topPolicy.length, 0,
+      `weak contradictions must not appear in TOP issues; got: ${topPolicy.map((i) => i.title).join(" | ")}`,
+    );
+  });
+});
+
 test("--no-narrative omits the narrative field from --json", () => {
   const raw = execFileSync(
     "node",

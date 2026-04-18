@@ -65,6 +65,8 @@ export type HistoryStep = {
 
 export type HistoryReport = {
   filePath: string;
+  /** Absolute path to the git working-tree root that owns these refs. */
+  gitRoot: string;
   steps: HistoryStep[];
   generatedAt: string;
   /** True if the first step is an EMPTY → first-commit baseline. */
@@ -131,6 +133,7 @@ export function runHistory(opts: RunHistoryOptions): HistoryReport {
 
   const report: HistoryReport = {
     filePath: opts.filePath,
+    gitRoot: gitTopLevel(opts.cwd),
     steps,
     generatedAt: new Date().toISOString(),
     includesEmptyBaseline: includeEmpty,
@@ -249,6 +252,16 @@ function readAtRef(ref: string, filePath: string, cwd: string): string {
   return execFileSync("git", ["show", `${ref}:${filePath}`], {
     cwd, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"],
   });
+}
+
+function gitTopLevel(cwd: string): string {
+  try {
+    return execFileSync("git", ["rev-parse", "--show-toplevel"], {
+      cwd, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"],
+    }).trim();
+  } catch {
+    return cwd;
+  }
 }
 
 function pad4(n: number): string {

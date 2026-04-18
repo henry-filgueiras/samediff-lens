@@ -28,6 +28,7 @@ export function direction(issue: Issue): Direction {
   switch (issue.kind) {
     case "commitment-weakening":
     case "guarantee-removed":
+    case "severity-downgraded":
     case "task-reopened":
       return "weakening";
 

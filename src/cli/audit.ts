@@ -49,6 +49,12 @@ export function runAudit(opts: AuditOptions): AuditSummary {
   const maxDiff = opts.maxDiffLines ?? 60;
   const includeQuiet = !!opts.includeQuiet;
 
+  // Use the git root recorded in trail.json so audit works from any
+  // directory (the user might run `samediff audit /tmp/...` from a
+  // completely different repo than the one history was run in).
+  // Fall back to cwd for trails generated before gitRoot was added.
+  const gitCwd = trail.gitRoot ?? opts.cwd;
+
   const sections: string[] = [];
   let withThesis = 0;
   let withComposite = 0;
@@ -68,7 +74,7 @@ export function runAudit(opts: AuditOptions): AuditSummary {
   );
 
   for (const step of trail.steps) {
-    const block = renderStep(step, opts.cwd, trail.filePath, maxDiff, includeQuiet);
+    const block = renderStep(step, gitCwd, trail.filePath, maxDiff, includeQuiet);
     sections.push(block.markdown);
     if (block.hasThesis) withThesis++;
     if (block.hasComposite) withComposite++;

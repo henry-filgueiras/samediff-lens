@@ -25,6 +25,7 @@ import {
   titleGuaranteeRemoved,
   titleConstraintIntroduced,
   titleScopeNarrowed,
+  titleSeverityDowngraded,
   titleTaskShift,
   titleTaskTransition,
   titleRename,
@@ -34,6 +35,10 @@ const KIND_WEIGHT: Record<IssueKind, number> = {
   "commitment-reversal": 9,
   "policy-reversal": 8,
   "guarantee-removed": 7,
+  // Severity downgrade sits at guarantee-removed level — losing strict
+  // enforcement is a real promise broken, even when the surface text
+  // change looks like a rename.
+  "severity-downgraded": 7,
   "constraint-introduced": 6,
   "commitment-strengthening": 5,
   "commitment-weakening": 5,
@@ -192,6 +197,21 @@ function buildIssue(c: Cluster, index: number): Issue {
       title = titleConstraintIntroduced(primary.before, after || before); break;
     case "scope-narrowed":
       title = titleScopeNarrowed(before, after); break;
+    case "severity-downgraded":
+      // Harsh / soft labels were stashed by classifyContradiction /
+      // classifyCommitmentShift / classifyRename. Defensive fallback
+      // keeps the contract: every Issue has a non-empty title.
+      if (primary.severityHarsh && primary.severitySoft) {
+        title = titleSeverityDowngraded(
+          primary.severityHarsh,
+          primary.severitySoft,
+          before,
+          after,
+        );
+      } else {
+        title = titleScopeNarrowed(before, after);
+      }
+      break;
     case "task-completed":
     case "task-reopened":
     case "task-scope-shift": {
@@ -265,6 +285,8 @@ function buildLede(
         : `A constraint${s} was tightened${n}.`;
     case "scope-narrowed":
       return `Scope${s} was narrowed by limiting language${n}.`;
+    case "severity-downgraded":
+      return `Enforcement${s} was downgraded — the consequence of violating it weakened${n}.`;
     case "commitment-strengthening":
       return `A commitment${s} was strengthened — modal escalation${n}.`;
     case "commitment-weakening":
