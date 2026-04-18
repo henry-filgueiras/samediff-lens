@@ -18,7 +18,7 @@ The core analysis engine in `src/analysis/` is shared between both surfaces. It 
 
 **Persistent judgment memory (v0.7.2):** `samediff audit` preserves reviewer verdicts across reruns at two grains — step and per-finding — in a schema-v2 `verdicts.json` sidecar living next to `audit.md`. Identity is the foundation: step identity is `sha256(fromRef || toRef || filePath)`; per-finding identity is a fingerprint of the *semantic core only* (kind + normalized evidence), deliberately excluding engine-labelled metadata (triggers, reason tag, confidence) so "same meaning → same fingerprint" survives detector retuning. If the evidence itself shifts, the fingerprint shifts, the old finding is retained in `orphanedFindings` with its verdict preserved, and the new finding is marked `[NEW]`; the step gets a `[DRIFTED]` badge and prior step-level verdicts are carried forward with a `re-review recommended` flag rather than silently rubber-stamped. The roundtrip is markdown-first: reviewers edit `**verdict**`/`**note**`/`**finding-verdicts**` slots in `audit.md` (per-finding overrides keyed by `{f:<12-hex>}` display id); rerun `samediff audit` harvests, persists, and re-renders with `*(carried from YYYY-MM-DD)*` annotations. Orphaned transitions (stepKey no longer in trail) are retained in `verdicts.json#orphanedSteps` so a spec rewrite can't silently drop last quarter's FP judgments. v1 stores migrate transparently on first read. observe → judge → preserve judgment, not observe → forget → repeat.
 
-**Trail-level thesis (v0.8):** `src/analysis/narrative/trail/` is a longitudinal layer above the pairwise macro thesis — "what happened across this document's lifetime" rather than "what drifted in this single diff." Same anti-hallucination contract: headlines come from a fixed catalog of doctrine patterns (`guarantees-restored-after-relaxation`, `syntax-contract-reversed`, `compliance-boundary-narrowed`, `operational-guarantees-broadly-weakened`, `policy-progressively-softened`, `severity-downgraded-systematically`, `rollout-mode-persistent`, `ownership-drift`); the subheadline is the only synthesised text and fills slots from cited step metadata + issue subjects verbatim. Conservative threshold is enforced at two grains: each pattern has its own floor (usually ≥3 same-kind issues across ≥2 steps) AND a pipeline-level earned check (arc-shaped firings need ≥1 issue per half AND ≥2 distinct steps; flat firings need ≥3 issues across ≥2 steps). Every thesis cites real `issue-id` values from real steps — the hierarchy `finding → issue → thesis` never skips a level, even at trail grain. Renderer placement in the history index: Tier 1 thesis band → drift chart → "Most consequential steps" cluster (cited + high-score) → full per-transition list. `audit.md` gets a matching `## History thesis` section above the state summary. When no pattern earns, the layer stays silent and the per-step views carry the report. Dogfood hits: DIRECTORS_NOTES fires a real `syntax-contract-reversed` on the file:// URI flip arc; `text/3698-declarative-derive-macros.md` fires `syntax-contract-reversed` on an unsafe flip; `text/1946-intra-rustdoc-links.md` stays silent (consistent with the user's prior assessment — incremental clarification doesn't earn a macro headline); `08-policy-drift` stays silent (the engine reads most of its drift as additive tightening / demoted contradictions, not weakenings — honest conservative behavior).
+**Trail-level thesis (v0.8):** `src/analysis/narrative/trail/` is a longitudinal layer above the pairwise macro thesis — "what happened across this document's lifetime" rather than "what drifted in this single diff." Same anti-hallucination contract: headlines come from a fixed catalog of doctrine patterns (`guarantees-restored-after-relaxation`, `syntax-contract-reversed`, `compliance-boundary-narrowed`, `operational-guarantees-broadly-weakened`, `policy-progressively-softened`, `severity-downgraded-systematically`, `rollout-mode-persistent`, `ownership-drift`); the subheadline is the only synthesised text and fills slots from cited step metadata + issue subjects verbatim. Conservative threshold is enforced at two grains: each pattern has its own floor (usually ≥3 same-kind issues across ≥2 steps) AND a pipeline-level earned check (arc-shaped firings need ≥1 issue per half AND ≥2 distinct steps; flat firings need ≥3 issues across ≥2 steps). Every thesis cites real `issue-id` values from real steps — the hierarchy `finding → issue → thesis` never skips a level, even at trail grain. The reversal-arc detector has a two-candidate design: Candidate A is the best single-family arc (security or compliance or reliability, whichever has highest salience); Candidate B is a cross-family *union arc* (built only when ≥2 distinct families each produced their own arc), which captures the "everything weakened and everything was restored" shape a single-family lens would miss. Union earns a 1.3× salience boost on top of the arc's 1.8×. Union-arc halves are partitioned by per-step net direction so the renderer displays two disjoint columns (no step shown in both halves). Renderer placement in the history index: Tier 1 thesis band → drift chart → "Most consequential steps" cluster (cited + high-score) → full per-transition list. `audit.md` gets a matching `## History thesis` section above the state summary. When no pattern earns, the layer stays silent and the per-step views carry the report. Dogfood hits: DIRECTORS_NOTES fires `syntax-contract-reversed` on the file:// URI flip arc; `text/3698-declarative-derive-macros.md` fires `syntax-contract-reversed` on an unsafe flip; `text/1946-intra-rustdoc-links.md` stays silent (consistent with the user's prior assessment — incremental clarification doesn't earn a macro headline); `08-policy-drift` stays silent (the engine reads most of its drift as additive tightening / demoted contradictions, not weakenings — honest conservative behavior); `09-guardrails-rollback` (new) fires `guarantees-restored-after-relaxation` in its cross-family union form, citing 18 issues across all 6 steps with the arc cleanly split Earlier=[0,1,2] ↔ Later=[3,4,5].
 
 **Working surfaces:**
 - CLI: `./samediff left.md right.md` (auto-builds if stale)
@@ -64,20 +64,109 @@ The core analysis engine in `src/analysis/` is shared between both surfaces. It 
 5. Added/removed concepts — unique tokens in focused phrase windows
 
 **Example spectrum (examples/):**
-01-modal-shift → 02-todo-drift → 03-api-contract → 04-prompt-policy → 05-hydra-doc-drift → 08-policy-drift (history)
+01-modal-shift → 02-todo-drift → 03-api-contract → 04-prompt-policy → 05-hydra-doc-drift → 08-policy-drift (history, monotone decay, trail stays silent) → 09-guardrails-rollback (history, reversal arc, trail fires)
 
 Three example shapes, all driven by `examples/generate.sh`:
 - **pair** — `left.md` + `right.md` (`samediff check`). Examples 01–05.
 - **dir-pair** — `v1/` + `v2/` directories (`samediff dir`). Example 07.
 - **history** — a single tracked `.md` at the dir root with real git
-  history (`samediff history --no-empty`). Example 08. The generated
-  `index.html` is copied to `findings.html` so the splash-card scraper
-  picks up the worst-score `stat-num` class the same way it does for
-  the other shapes.
+  history (`samediff history --no-empty`). Examples 08 and 09. The
+  generated `index.html` is copied to `findings.html` so the splash-
+  card scraper picks up the worst-score `stat-num` class the same way
+  it does for the other shapes. The splash scraper also picks up
+  `tt-headline` (trail thesis) as the highest-priority headline for
+  history-shape examples — that's what renders "Guarantees weakened
+  and later restored" on the 09 card.
 
-**Test counts:** 28 engine tests + 112 CLI integration tests + 24 PR-reviewer tests + 23 narrative tests + 11 multi-file tests + 13 source-diff tests + 11 macro-thesis tests + 21 history+scan+audit tests + 19 trail-thesis tests, all passing (262 total)
+**Test counts:** 28 engine tests + 112 CLI integration tests + 24 PR-reviewer tests + 23 narrative tests + 11 multi-file tests + 13 source-diff tests + 11 macro-thesis tests + 21 history+scan+audit tests + 20 trail-thesis tests, all passing (263 total)
 
 ## Devlog
+
+### 2026-04-18 — Claude Opus 4.7 — 09-guardrails-rollback example + cross-family union arc
+
+None of the published Pages examples showcased the trail-thesis
+layer firing — 08-policy-drift stays silent (engine reads its drift
+as concept churn), and the other examples are pair-shaped, not
+history-shaped. Added `examples/09-guardrails-rollback/` — a
+platform-hardening doc whose commit arc explicitly weakens auth,
+encryption, and audit during beta rollout and then explicitly
+restores them pre-GA.
+
+The first attempt surfaced a limitation in `detectReversalArc`:
+per-family arcs were picking only ONE family's reversal, so the
+coordinated cross-family story (security + compliance + reliability
+all weakened, all restored) showed up as a 4-cite security-only arc
+with salience 129, which lost by salience to a 28-cite ownership-
+drift firing (170.9). The ownership signal was real — 6 distinct
+authors flipping policy *is* an operational story — but the user
+designed the example around the reversal doctrine, so the wrong
+pattern was winning.
+
+**Fix: union arc in `detectReversalArc`.** Two-candidate design:
+
+- **Candidate A** — best single-family arc (unchanged): pick the
+  family with highest-salience weakening→tightening arc.
+- **Candidate B** — cross-family union arc (new): built only when
+  ≥2 distinct families have *already* produced their own per-family
+  arcs. We don't invent a reversal where none exists in any family;
+  we only widen the lens when multiple families have independently
+  demonstrated the pattern. Dedupe across family buckets (issues in
+  {security, compliance} would otherwise be counted twice). Union
+  earns a 1.3× salience multiplier on top of the arc's 1.8×.
+
+Union-arc halves are partitioned by **per-step net direction** —
+the count of weakening issues minus tightening issues per step. A
+step with a mix (e.g., a "restore auth" commit that both removes
+the beta clause *and* adds a strengthening modal) lands in whichever
+half its majority leans toward, not both. Ties break by stepIndex
+position on the trail. Renderer displays two disjoint columns, no
+duplication.
+
+Result on 09-guardrails-rollback: reversal salience 297.5 (up from
+129), 18 citations across all 6 steps, arc Earlier=[0,1,2] ↔
+Later=[3,4,5]. Cleanly beats ownership-drift (170.9) and fires as
+the trail thesis headline on the splash card: "Guarantees weakened
+and later restored".
+
+**Splash scraper update.** `examples/generate.sh` now prefers the
+`tt-headline` CSS class (trail thesis) over the older
+`thesis-headline` / `headline-title` scrape targets when building
+the per-example splash card. Priority order:
+
+> trail thesis (longitudinal) > macro thesis (per-diff doctrine) >
+> narrative headline (accusation) > aggregate file headline
+
+That matches the three-tier doctrine: the highest-level available
+synthesis is the best summary for a landing card.
+
+**Rendered artifact.** After `bash examples/generate.sh`:
+
+- `examples/findings.html` — splash with the 09 card carrying the
+  trail thesis headline
+- `examples/09-guardrails-rollback/findings.html` (= `index.html`) —
+  history index with the Tier 1 trail thesis band at the top,
+  drift chart, "Most consequential steps" cluster, and full 6-step
+  transition list
+- `examples/09-guardrails-rollback/000N-...html` — per-pair report
+  for each transition, linked from the thesis band's citation chips
+
+The example is visible on Pages after the next push. Until then,
+`open examples/09-guardrails-rollback/index.html` locally renders
+the same thing.
+
+**Tests: 262 → 263.** One new test in `trail-thesis.test.mjs`:
+09-guardrails-rollback must fire `guarantees-restored-after-
+relaxation` with a reversal arc whose halves are disjoint AND whose
+evidence topics include auth + encryption. If the doctrine ever
+over-aggressively promotes a different pattern by salience, this
+test breaks — the showcase is the load-bearing assertion that the
+feature's most compelling firing stays visible.
+
+**Not done.** No per-family-arc regression test (the single-family
+path); existing `rename A→B then B→A fires syntax-contract-reversed`
+and the synthetic reversal tests still cover the core arc shape.
+Could add a "union arc requires ≥2 families with independent arcs"
+test explicitly — deferred.
 
 ### 2026-04-18 — Claude Opus 4.7 — Trail-thesis test suite: shared fixture + render unit test
 

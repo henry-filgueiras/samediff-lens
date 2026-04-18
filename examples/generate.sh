@@ -165,13 +165,13 @@ HEAD
             esac
         fi
 
-        # Headline priority: macro thesis (doctrine) > narrative headline
-        # (accusation) > aggregate file headline (multi-file fallback).
-        # The thesis is the highest-level synthesis when one fires; we
-        # prefer it for the splash because that's literally "what an
-        # engineer would say after reading the whole diff".
+        # Headline priority: trail thesis (longitudinal) > macro thesis
+        # (doctrine in one diff) > narrative headline (accusation) >
+        # aggregate file headline (multi-file fallback). The trail
+        # thesis is the highest-level synthesis available — "what an
+        # engineer would say after reading the whole history."
         headline=""
-        for cls in "thesis-headline" "agg-thesis-headline" "headline-title" "agg-headline"; do
+        for cls in "tt-headline" "thesis-headline" "agg-thesis-headline" "headline-title" "agg-headline"; do
             line="$(grep -m1 -oE "<div class=\"$cls\">[^<]*</div>" "$findings")" || line=""
             if [[ -n "$line" ]]; then
                 headline="$(printf '%s' "$line" | sed -E "s|<div class=\"$cls\">([^<]*)</div>|\\1|")"

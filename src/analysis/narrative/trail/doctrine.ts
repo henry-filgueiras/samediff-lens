@@ -54,8 +54,16 @@ function detectReversalArc(steps: StepNarrativeInput[]): TrailPatternResult | nu
   const classified = classifyAcrossTrail(steps);
   const byFamily = groupByFamily(classified);
 
-  // Try each family in turn; pick the strongest arc.
-  let best: { family: Family; result: TrailPatternResult } | null = null;
+  // Per-family arcs — the ground truth. Each qualifying family gets
+  // its own arc entry; the union arc below is only allowed to fire
+  // when at least 2 distinct families qualified independently.
+  type FamilyArc = {
+    family: Family;
+    earlierSteps: number[];
+    laterSteps: number[];
+    cited: ClassifiedIssue[];
+  };
+  const perFamily: FamilyArc[] = [];
 
   for (const family of ALL_FAMILIES) {
     const bucket = byFamily[family];
@@ -87,33 +95,107 @@ function detectReversalArc(steps: StepNarrativeInput[]): TrailPatternResult | nu
         laterSteps.includes(c.step.stepIndex),
     );
 
-    // Salience: arc gets a strong boost (reversals are the clearest
-    // story a trail can tell).
-    const salience = sumSalience(cited) * 1.8;
+    perFamily.push({ family, earlierSteps, laterSteps, cited });
+  }
 
-    const arc: TrailArc = {
-      kind: "reversal",
-      earlierSteps,
-      laterSteps,
-      family,
-    };
+  if (perFamily.length === 0) return null;
 
-    const result: TrailPatternResult = {
-      patternId: "guarantees-restored-after-relaxation",
-      headline: "Guarantees weakened and later restored",
-      citedStepIndices: uniqueStepIndices(cited),
-      citedIssueRefs: cited.map((c) => c.citation),
-      evidenceTopics: uniqueTopics(cited),
-      arc,
-      salience,
-    };
+  // Candidate A: best single-family arc.
+  const singleFamily = perFamily
+    .map((fa) => ({
+      family: fa.family,
+      result: toResult(fa.cited, fa.earlierSteps, fa.laterSteps, fa.family),
+    }))
+    .sort((a, b) => b.result.salience - a.result.salience)[0];
 
-    if (!best || result.salience > best.result.salience) {
-      best = { family, result };
+  // Candidate B (earned only when ≥2 distinct families independently
+  // reversed): the union arc — cross-family coordinated reversal. This
+  // is the "compliance AND security AND reliability all weakened and
+  // were all restored" shape. We don't invent a reversal where none
+  // exists in any family; we only widen the lens when per-family
+  // reversals have already demonstrated the pattern.
+  //
+  // Step halving uses *net* direction per step (majority weakening →
+  // earlier half; majority tightening → later) so the renderer can
+  // display the arc as two disjoint columns instead of putting the
+  // same step in both halves.
+  let unionCandidate: TrailPatternResult | null = null;
+  if (perFamily.length >= 2) {
+    // Deduplicate across buckets (an issue in 2 families appears twice).
+    const seen = new Set<string>();
+    const allCited: ClassifiedIssue[] = [];
+    for (const fa of perFamily) {
+      for (const c of fa.cited) {
+        const key = `${c.step.stepIndex}\0${c.issue.id}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        allCited.push(c);
+      }
+    }
+    // Net direction per step: weakenings minus tightenings. Ties go
+    // to whichever side the step leans on by stepIndex position — if
+    // a step is in the earlier half of the trail overall, treat as
+    // weakening; otherwise tightening.
+    const perStepNet = new Map<number, number>();
+    for (const c of allCited) {
+      if (c.direction === "weakening") perStepNet.set(c.step.stepIndex, (perStepNet.get(c.step.stepIndex) ?? 0) + 1);
+      else if (c.direction === "tightening") perStepNet.set(c.step.stepIndex, (perStepNet.get(c.step.stepIndex) ?? 0) - 1);
+    }
+    const trailMidpoint = (steps[0].stepIndex + steps[steps.length - 1].stepIndex) / 2;
+    const earlierUnion: number[] = [];
+    const laterUnion: number[] = [];
+    for (const [idx, net] of perStepNet) {
+      if (net > 0) earlierUnion.push(idx);
+      else if (net < 0) laterUnion.push(idx);
+      else if (idx <= trailMidpoint) earlierUnion.push(idx);
+      else laterUnion.push(idx);
+    }
+    earlierUnion.sort((a, b) => a - b);
+    laterUnion.sort((a, b) => a - b);
+    if (earlierUnion.length > 0 && laterUnion.length > 0) {
+      // The arc must still be an actual reversal — latest tighten
+      // after earliest weaken.
+      const earliest = Math.min(...earlierUnion);
+      const latest = Math.max(...laterUnion);
+      if (latest > earliest) {
+        unionCandidate = toResult(allCited, earlierUnion, laterUnion, "mixed");
+        // Cross-family coordination earns an extra multiplicative
+        // boost on top of the arc multiplier — the story "everything
+        // weakened and everything was restored" is operationally
+        // stronger than any single family's arc.
+        unionCandidate = { ...unionCandidate, salience: unionCandidate.salience * 1.3 };
+      }
     }
   }
 
-  return best?.result ?? null;
+  // Pick the stronger candidate.
+  if (unionCandidate && unionCandidate.salience > singleFamily.result.salience) {
+    return unionCandidate;
+  }
+  return singleFamily.result;
+}
+
+function toResult(
+  cited: ClassifiedIssue[],
+  earlierSteps: number[],
+  laterSteps: number[],
+  family: string,
+): TrailPatternResult {
+  const arc: TrailArc = {
+    kind: "reversal",
+    earlierSteps,
+    laterSteps,
+    family,
+  };
+  return {
+    patternId: "guarantees-restored-after-relaxation",
+    headline: "Guarantees weakened and later restored",
+    citedStepIndices: uniqueStepIndices(cited),
+    citedIssueRefs: cited.map((c) => c.citation),
+    evidenceTopics: uniqueTopics(cited),
+    arc,
+    salience: sumSalience(cited) * 1.8,
+  };
 }
 
 // ── 2. Syntax contract reversed after review ────────────────────────

@@ -372,6 +372,44 @@ test("renderTrailThesisSection emits a '## History thesis' markdown block with c
   assert.match(md, /\*\*arc\*\*: reversal/);
 });
 
+// ── 09-guardrails-rollback: showcase example must fire the reversal arc ─
+
+test("09-guardrails-rollback fires guarantees-restored-after-relaxation", () => {
+  // Showcase example for the trail-thesis feature. The commit arc
+  // weakens auth / encryption / audit during beta and restores them
+  // all post-beta — the canonical cross-family reversal shape. If this
+  // test breaks, the doctrine is probably over-aggressive (some new
+  // pattern is beating the reversal by salience) and the feature
+  // showcase needs re-tuning.
+  const dir = mkdtempSync(resolve(tmpdir(), "samediff-09-"));
+  try {
+    runCli("history", "examples/09-guardrails-rollback/guardrails.md", "-o", dir, "--no-empty");
+    const trail = JSON.parse(readFileSync(join(dir, "trail.json"), "utf-8"));
+    assert.ok(trail.trailThesis, "09-guardrails-rollback must fire a trail thesis");
+    assert.equal(trail.trailThesis.patternId, "guarantees-restored-after-relaxation");
+    assert.equal(trail.trailThesis.headline, "Guarantees weakened and later restored");
+    assert.ok(trail.trailThesis.arc, "expected arc-shaped thesis");
+    assert.equal(trail.trailThesis.arc.kind, "reversal");
+    // Arc halves must be disjoint — the renderer puts them in two
+    // columns and overlap would be confusing.
+    const earlier = new Set(trail.trailThesis.arc.earlierSteps);
+    for (const idx of trail.trailThesis.arc.laterSteps) {
+      assert.ok(!earlier.has(idx), `step ${idx} appears in both halves`);
+    }
+    // Topics pulled verbatim from cited-issue subjects — expect the
+    // hardening-doc vocabulary.
+    const topics = trail.trailThesis.evidenceTopics.map((t) => t.toLowerCase());
+    for (const expected of ["auth", "encryption"]) {
+      assert.ok(
+        topics.includes(expected),
+        `expected topic "${expected}" in evidenceTopics, got [${topics.join(", ")}]`,
+      );
+    }
+  } finally {
+    rmSync(dir, { force: true, recursive: true });
+  }
+});
+
 // ── 08-policy-drift: legitimate silence ──────────────────────────────
 
 test("08-policy-drift trail either fires a catalog pattern or stays silent", () => {
