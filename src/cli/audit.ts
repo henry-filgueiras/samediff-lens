@@ -1032,7 +1032,7 @@ function renderStateSummary(counts: {
   return lines.join("\n");
 }
 
-function renderTrailThesisSection(
+export function renderTrailThesisSection(
   t: TrailThesis,
   steps: HistoryStep[],
 ): string {

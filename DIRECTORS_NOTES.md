@@ -79,6 +79,41 @@ Three example shapes, all driven by `examples/generate.sh`:
 
 ## Devlog
 
+### 2026-04-18 — Claude Opus 4.7 — Trail-thesis test suite: shared fixture + render unit test
+
+The trail-thesis suite was taking ~3:05 to run: five tests each
+called `runHistory("DIRECTORS_NOTES.md")` in their own tempdir, and
+one more ran `runAudit` on top. Each run walks 29 commits through
+the full engine + per-pair HTML renderer — ~30s per call, so
+5 × 30s + one audit run blew the budget.
+
+Two changes:
+
+1. **Shared history fixture.** The read-only tests (HTML band,
+   consequential-steps cluster, trail.json shape, catalog headline
+   invariant) now share one trail built in a top-level `before()`
+   hook. None of them mutate the output directory, so sharing is
+   safe by construction. `after()` tears it down at the end of the
+   file. Tests that need isolation (08-policy-drift, the synthetic-
+   input unit tests) keep their own fixtures — the synthetic ones
+   run in microseconds and the policy-drift trail is only 7 steps.
+
+2. **Unit-test the audit render.** The "audit.md includes a History
+   thesis section" test used to run `samediff audit` on a 29-commit
+   trail — a second 30s engine walk for a one-function rendering
+   assertion. Exported `renderTrailThesisSection` from `audit.ts`
+   and unit-tested it directly against a synthetic `TrailThesis` +
+   `HistoryStep[]` fixture. The end-to-end wiring (runAudit writes
+   audit.md) stays covered by `tools/history-scan.test.mjs`.
+
+Result: **~3:05 → 34s**, 5.5× faster. The remaining 33s is a single
+`runHistory("DIRECTORS_NOTES.md")` in `before()` — 29 commits × full
+engine × per-pair HTML render. Further wins would require either an
+engine-level caching flag (`samediff history --no-per-pair-html` for
+CI) or a smaller fixture file with enough commit-arc shape to fire
+a trail thesis. Deferred — 34s for 19 tests (including 5 real-trail
+assertions + 1 real policy-drift walk) is a reasonable floor.
+
 ### 2026-04-18 — Claude Opus 4.7 — Trail-level thesis (longitudinal truth)
 
 Landed `src/analysis/narrative/trail/` — the layer that answers

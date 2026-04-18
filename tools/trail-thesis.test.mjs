@@ -11,15 +11,25 @@
  * real steps. Every headline comes from a fixed catalog. No freeform
  * sentence assembly — the subheadline is the only synthesis, filled
  * from step metadata and cited-issue topics.
+ *
+ * Fixture strategy: real-trail tests (DIRECTORS_NOTES history) are
+ * read-only — they assert shape, not mutation — so one shared trail
+ * dir is built in the before() hook and every test reads from it.
+ * That turns ~4 × 30s (engine walk per test) into a single 30s setup.
+ * The audit-layer render is unit-tested directly against
+ * renderTrailThesisSection() to avoid a second 30s engine walk per
+ * step that adds no coverage beyond the render function itself.
+ * Synthetic-input tests run in microseconds so they don't benefit
+ * from sharing.
  */
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { test } from "node:test";
+import { before, after, test } from "node:test";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const cli = resolve(repoRoot, "dist-cli/cli/index.js");
@@ -27,19 +37,46 @@ const {
   buildTrailThesis,
   TRAIL_DOCTRINE,
   TRAIL_HEADLINES,
-} = await import(pathToFileURL(resolve(repoRoot, "dist-cli/analysis/narrative/trail/index.js")));
+} = await import("file://" + resolve(repoRoot, "dist-cli/analysis/narrative/trail/index.js"));
+const { renderTrailThesisSection } = await import(
+  "file://" + resolve(repoRoot, "dist-cli/cli/audit.js")
+);
 
-function pathToFileURL(p) {
-  return "file://" + p;
-}
-
-function runHistory(filePath, outDir) {
-  return execFileSync("node", [cli, "history", filePath, "-o", outDir, "--no-config"], {
+function runCli(...args) {
+  return execFileSync("node", [cli, ...args, "--no-config"], {
     cwd: repoRoot,
     encoding: "utf-8",
     env: { ...process.env, NO_COLOR: "1" },
   });
 }
+
+// ── Shared fixture: DIRECTORS_NOTES trail (built once) ────────────────
+//
+// Five tests below need a real trail on DIRECTORS_NOTES.md plus one
+// needs the audit.md produced from it. Each runHistory on that file
+// is ~30s (28 transitions × full pipeline × per-pair HTML render);
+// doing it once in before() and sharing the directory is ~5× faster
+// than rebuilding per test.
+//
+// The shared fixture is strictly read-only — no test mutates audit.md
+// or trail.json. Tests that need a fresh fixture (e.g. to exercise
+// audit's rerun path) would need their own tempdir, but none of the
+// trail-thesis tests do.
+
+let sharedDir = null;
+let sharedTrail = null;
+let sharedHtml = null;
+
+before(() => {
+  sharedDir = mkdtempSync(resolve(tmpdir(), "samediff-trail-shared-"));
+  runCli("history", "DIRECTORS_NOTES.md", "-o", sharedDir);
+  sharedTrail = JSON.parse(readFileSync(join(sharedDir, "trail.json"), "utf-8"));
+  sharedHtml = readFileSync(join(sharedDir, "index.html"), "utf-8");
+});
+
+after(() => {
+  if (sharedDir) rmSync(sharedDir, { force: true, recursive: true });
+});
 
 // ── Fixed-catalog contract ───────────────────────────────────────────
 
@@ -260,87 +297,95 @@ test("evidence topics appear verbatim in some cited issue's subject", () => {
 });
 
 // ── Renderer integration: HTML band + audit.md section ──────────────
+//
+// These all read from the shared DIRECTORS_NOTES fixture built in
+// before(). They assert shape and are strictly read-only.
 
 test("history HTML index embeds a trail-thesis band when one fires", () => {
-  const dir = mkdtempSync(resolve(tmpdir(), "samediff-trail-"));
-  try {
-    runHistory("DIRECTORS_NOTES.md", dir);
-    const html = readFileSync(join(dir, "index.html"), "utf-8");
-    const trail = JSON.parse(readFileSync(join(dir, "trail.json"), "utf-8"));
-    if (!trail.trailThesis) return; // conservative case — nothing to assert
-    assert.match(html, /class="trail-thesis/, "expected trail-thesis band in HTML");
-    assert.match(html, /History thesis/, "expected section label");
-    // Headline is embedded verbatim — confirm it made it through escaping.
-    const esc = trail.trailThesis.headline
-      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    assert.ok(html.includes(esc), `expected headline "${esc}" in HTML`);
-  } finally {
-    rmSync(dir, { force: true, recursive: true });
-  }
+  if (!sharedTrail.trailThesis) return; // conservative case — nothing to assert
+  assert.match(sharedHtml, /class="trail-thesis/, "expected trail-thesis band in HTML");
+  assert.match(sharedHtml, /History thesis/, "expected section label");
+  // Headline is embedded verbatim — confirm it made it through escaping.
+  const esc = sharedTrail.trailThesis.headline
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  assert.ok(sharedHtml.includes(esc), `expected headline "${esc}" in HTML`);
 });
 
 test("history HTML renders a 'Most consequential steps' cluster when trail is long enough", () => {
-  const dir = mkdtempSync(resolve(tmpdir(), "samediff-trail-"));
-  try {
-    runHistory("DIRECTORS_NOTES.md", dir);
-    const html = readFileSync(join(dir, "index.html"), "utf-8");
-    assert.match(html, /Most consequential steps/, "expected consequential-steps section");
-  } finally {
-    rmSync(dir, { force: true, recursive: true });
-  }
+  assert.match(sharedHtml, /Most consequential steps/, "expected consequential-steps section");
 });
 
 test("trail.json carries trailThesis field (null or object)", () => {
-  const dir = mkdtempSync(resolve(tmpdir(), "samediff-trail-"));
-  try {
-    runHistory("DIRECTORS_NOTES.md", dir);
-    const trail = JSON.parse(readFileSync(join(dir, "trail.json"), "utf-8"));
-    assert.ok("trailThesis" in trail, "trail.json must include trailThesis field");
-    if (trail.trailThesis !== null) {
-      assert.equal(typeof trail.trailThesis.patternId, "string");
-      assert.equal(typeof trail.trailThesis.headline, "string");
-      assert.ok(Array.isArray(trail.trailThesis.citedIssueRefs));
-      assert.ok(Array.isArray(trail.trailThesis.citedStepIndices));
-    }
-  } finally {
-    rmSync(dir, { force: true, recursive: true });
+  assert.ok("trailThesis" in sharedTrail, "trail.json must include trailThesis field");
+  if (sharedTrail.trailThesis !== null) {
+    assert.equal(typeof sharedTrail.trailThesis.patternId, "string");
+    assert.equal(typeof sharedTrail.trailThesis.headline, "string");
+    assert.ok(Array.isArray(sharedTrail.trailThesis.citedIssueRefs));
+    assert.ok(Array.isArray(sharedTrail.trailThesis.citedStepIndices));
   }
 });
 
-test("audit.md includes a History thesis section when the trail thesis fires", () => {
-  const dir = mkdtempSync(resolve(tmpdir(), "samediff-audit-trail-"));
-  try {
-    runHistory("DIRECTORS_NOTES.md", dir);
-    execFileSync("node", [cli, "audit", dir, "--no-config"], {
-      cwd: repoRoot,
-      encoding: "utf-8",
-      env: { ...process.env, NO_COLOR: "1" },
-    });
-    const audit = readFileSync(join(dir, "audit.md"), "utf-8");
-    const trail = JSON.parse(readFileSync(join(dir, "trail.json"), "utf-8"));
-    if (!trail.trailThesis) return; // conservative — no thesis to render
-    assert.match(audit, /^## History thesis/m);
-    assert.ok(
-      audit.includes(trail.trailThesis.headline),
-      `expected headline "${trail.trailThesis.headline}" in audit.md`,
-    );
-    assert.match(audit, /\*\*Supporting citations\*\*/);
-  } finally {
-    rmSync(dir, { force: true, recursive: true });
+test("renderTrailThesisSection emits a '## History thesis' markdown block with citations", () => {
+  // Unit test against the render function directly — cheaper than
+  // running `samediff audit` end-to-end (~30s on a 28-commit trail)
+  // and isolates what we actually need to assert: that a trail thesis
+  // becomes a properly-structured markdown section.
+  //
+  // The end-to-end wiring (runAudit writes audit.md) is covered by
+  // tools/history-scan.test.mjs.
+  const thesis = {
+    patternId: "guarantees-restored-after-relaxation",
+    headline: "Guarantees weakened and later restored",
+    subheadline: "Across 3 steps spanning 2026-01-01 → 2026-01-05 — driven by auth, encryption",
+    severity: "high",
+    confidence: "medium",
+    citedStepIndices: [1, 2, 4],
+    citedIssueRefs: [
+      { stepIndex: 1, issueId: "issue-0", toShort: "aaaaaaaa", authorDate: "2026-01-01T00:00:00Z",
+        issueTitle: "Commitment weakened on auth", issueKind: "commitment-weakening" },
+      { stepIndex: 2, issueId: "issue-0", toShort: "bbbbbbbb", authorDate: "2026-01-03T00:00:00Z",
+        issueTitle: "Commitment weakened on encryption", issueKind: "commitment-weakening" },
+      { stepIndex: 4, issueId: "issue-0", toShort: "cccccccc", authorDate: "2026-01-05T00:00:00Z",
+        issueTitle: "Commitment strengthened on auth", issueKind: "commitment-strengthening" },
+    ],
+    evidenceTopics: ["auth", "encryption"],
+    arc: {
+      kind: "reversal", earlierSteps: [1, 2], laterSteps: [4], family: "security",
+    },
+    salience: 30.5,
+  };
+  const steps = [
+    { index: 1, fromRef: "zzz", toRef: "aaaaaaaaXXX", toShort: "aaaaaaaa" },
+    { index: 2, fromRef: "aaaaaaaaXXX", toRef: "bbbbbbbbXXX", toShort: "bbbbbbbb" },
+    { index: 4, fromRef: "bbbbbbbbXXX", toRef: "ccccccccXXX", toShort: "cccccccc" },
+  ];
+  const md = renderTrailThesisSection(thesis, steps);
+  assert.match(md, /^## History thesis/m, "expected section header");
+  assert.ok(md.includes(thesis.headline), "expected headline to appear verbatim");
+  assert.ok(md.includes(thesis.subheadline), "expected subheadline to appear verbatim");
+  assert.match(md, /\*\*Supporting citations\*\*/, "expected citations block");
+  // Every cited step index should appear in the citations list.
+  for (const idx of thesis.citedStepIndices) {
+    assert.ok(md.includes(`Step ${idx}`), `expected citation for step ${idx}`);
   }
+  // Arc block renders when arc is present
+  assert.match(md, /\*\*arc\*\*: reversal/);
 });
 
 // ── 08-policy-drift: legitimate silence ──────────────────────────────
 
 test("08-policy-drift trail either fires a catalog pattern or stays silent", () => {
-  // This example is mostly additive tightenings (GDPR rights added, breach
-  // notification added, etc.) plus a final whole-doc rewrite. The engine
-  // sees most drift as concept churn, not weakenings. The trail layer
-  // should stay silent (no earned pattern) OR fire something from the
-  // catalog — never synthesize a freeform headline.
+  // Single-use fixture (not shared) — 7-step trail is cheap (~2s) and
+  // no other test reads it.
+  //
+  // This example is mostly additive tightenings (GDPR rights added,
+  // breach notification added, etc.) plus a final whole-doc rewrite.
+  // The engine sees most drift as concept churn, not weakenings. The
+  // trail layer should stay silent (no earned pattern) OR fire
+  // something from the catalog — never synthesize a freeform headline.
   const dir = mkdtempSync(resolve(tmpdir(), "samediff-policy-"));
   try {
-    runHistory("examples/08-policy-drift/policy.md", dir);
+    runCli("history", "examples/08-policy-drift/policy.md", "-o", dir);
     const trail = JSON.parse(readFileSync(join(dir, "trail.json"), "utf-8"));
     if (trail.trailThesis) {
       assert.ok(
@@ -353,27 +398,20 @@ test("08-policy-drift trail either fires a catalog pattern or stays silent", () 
   }
 });
 
-// ── Headline catalog invariant (end-to-end across any trail) ────────
+// ── Headline catalog invariant (end-to-end on the shared fixture) ───
 
 test("whatever fires on DIRECTORS_NOTES.md has a catalog-conformant headline", () => {
-  const dir = mkdtempSync(resolve(tmpdir(), "samediff-trail-"));
-  try {
-    runHistory("DIRECTORS_NOTES.md", dir);
-    const trail = JSON.parse(readFileSync(join(dir, "trail.json"), "utf-8"));
-    if (!trail.trailThesis) return;
-    assert.ok(
-      TRAIL_HEADLINES.has(trail.trailThesis.headline),
-      `headline "${trail.trailThesis.headline}" not in fixed catalog`,
-    );
-    // Subheadline is synthesised but must start with "Across N step"
-    assert.match(
-      trail.trailThesis.subheadline,
-      /^Across \d+ step/,
-      "subheadline must follow the constrained template",
-    );
-  } finally {
-    rmSync(dir, { force: true, recursive: true });
-  }
+  if (!sharedTrail.trailThesis) return;
+  assert.ok(
+    TRAIL_HEADLINES.has(sharedTrail.trailThesis.headline),
+    `headline "${sharedTrail.trailThesis.headline}" not in fixed catalog`,
+  );
+  // Subheadline is synthesised but must start with "Across N step"
+  assert.match(
+    sharedTrail.trailThesis.subheadline,
+    /^Across \d+ step/,
+    "subheadline must follow the constrained template",
+  );
 });
 
 // ── Helpers ─────────────────────────────────────────────────────────
