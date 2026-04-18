@@ -13,6 +13,8 @@ import { formatAnalysisReport } from "../lib/report";
 import { computeDriftScore } from "./scoring";
 import { buildDiffResult } from "./resultModel";
 import { buildNarrative } from "../analysis/narrative";
+import { runMultiFile } from "./multiFile";
+import { formatMultiHtmlReport } from "./formatMultiHtml";
 import { parseGitArgs, resolveGitRef } from "./git";
 import { watchFiles } from "./watch";
 import { readAllStdin } from "./stdin";
@@ -56,6 +58,9 @@ Usage:
   samediff policies                        List available policies
   samediff baseline <left> <right>         Write a baseline snapshot
                     [-o <path>]              (default: .samediff-baseline.json)
+  samediff dir <left-dir> <right-dir>      Compare every .md/.txt file under
+                    [--json|--html]          two directory roots and emit one
+                    [-o <path>]              aggregated narrative report
 
 Config & policy:
   --config <path>       Load an explicit .samediff.json (skip auto-discovery)
@@ -156,6 +161,9 @@ function main() {
   }
   if (subcommand === "baseline") {
     return runBaselineCommand(args.slice(1), cwd);
+  }
+  if (subcommand === "dir") {
+    return runDirCommand(args.slice(1), cwd);
   }
   if (subcommand === "check") {
     // `check` is the explicit form; same pipeline as bareword invocation
@@ -643,6 +651,97 @@ function runPoliciesCommand(args: string[], cwd: string): void {
     console.error(`Error: ${err?.message ?? err}`);
     process.exit(1);
   }
+}
+
+function runDirCommand(args: string[], cwd: string): void {
+  const outArg = getFlagValue(args, ["-o", "--out"]);
+  const wantJson = hasFlag(args, "--json");
+  const wantHtml = hasFlag(args, "--html");
+  if (wantJson && wantHtml) {
+    console.error("Error: pass at most one of --json / --html.");
+    process.exit(2);
+  }
+
+  const positional: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === "--") continue;
+    if (a.startsWith("-")) {
+      if (VALUE_TAKING_FLAGS.has(a)) i++;
+      continue;
+    }
+    positional.push(a);
+  }
+  if (positional.length < 2) {
+    console.error("Usage: samediff dir <left-dir> <right-dir> [--json|--html] [-o <path>]");
+    process.exit(2);
+  }
+
+  const leftRoot = resolve(cwd, positional[0]);
+  const rightRoot = resolve(cwd, positional[1]);
+
+  let report;
+  try {
+    report = runMultiFile({ leftRoot, rightRoot });
+  } catch (err: any) {
+    console.error(`Error: ${err?.message ?? err}`);
+    process.exit(1);
+  }
+
+  // Default format: HTML when writing to a file, otherwise a brief
+  // terminal summary. JSON when --json. Full HTML report when --html.
+  const outFile = outArg ? resolve(cwd, outArg) : null;
+  const format: "json" | "html" | "summary" =
+    wantJson ? "json"
+    : wantHtml ? "html"
+    : outFile ? "html"
+    : "summary";
+
+  let content: string;
+  if (format === "json") {
+    content = JSON.stringify(report, null, 2) + "\n";
+  } else if (format === "html") {
+    content = formatMultiHtmlReport(report);
+  } else {
+    content = renderDirSummary(report);
+  }
+
+  if (outFile) {
+    writeFileSync(outFile, content, "utf-8");
+    console.error(`Wrote ${formatSize(Buffer.byteLength(content))} to ${shortPath(outFile)}`);
+    process.exit(0);
+  } else {
+    // Wait for stdout to fully drain before exiting — multi-file output can
+    // exceed 64KB and process.exit races the pipe buffer otherwise.
+    process.stdout.write(content, () => process.exit(0));
+  }
+}
+
+function renderDirSummary(report: ReturnType<typeof runMultiFile>): string {
+  const a = report.aggregate;
+  const lines: string[] = [];
+  lines.push(`SameDiff: ${a.fileCount} file${a.fileCount === 1 ? "" : "s"} compared, ${a.filesWithDrift} with drift`);
+  lines.push(`  worst score: ${a.maxScore.toFixed(1)} (${a.severity})`);
+  lines.push(`  total findings: ${a.totalFindings}`);
+  if (a.headline) {
+    lines.push("");
+    lines.push(`HEADLINE: ${a.headline}`);
+  }
+  if (a.topIssues.length > 0) {
+    lines.push("");
+    lines.push(`TOP ISSUES (${a.topIssues.length}):`);
+    for (const issue of a.topIssues.slice(0, 8)) {
+      lines.push(`  [${issue.severity.padEnd(8)}] ${issue.file} \u2014 ${issue.title}`);
+    }
+  }
+  if (report.notices.length > 0) {
+    lines.push("");
+    lines.push(`STRUCTURAL DRIFT (${report.notices.length}):`);
+    for (const n of report.notices) {
+      lines.push(`  ${n.kind.padEnd(14)} ${n.path}`);
+    }
+  }
+  return lines.join("\n") + "\n";
 }
 
 function runBaselineCommand(args: string[], cwd: string): void {

@@ -18,8 +18,9 @@ The core analysis engine in `src/analysis/` is shared between both surfaces. It 
 
 **Working surfaces:**
 - CLI: `./samediff left.md right.md` (auto-builds if stale)
+- CLI multi-file: `./samediff dir <left-dir> <right-dir>` (one aggregated report across many files)
 - Browser: `npm run dev` or live at GitHub Pages
-- Tests: 20 engine tests + 100 CLI integration tests, all passing
+- Tests: 28 engine + 100 CLI + 24 PR-reviewer + 19 narrative + 11 multi-file = 182, all passing
 
 **Repo-level configuration:**
 - `.samediff.json` (walked up from cwd; stops at `$HOME` / filesystem root) declares a repo's drift contract
@@ -61,9 +62,93 @@ The core analysis engine in `src/analysis/` is shared between both surfaces. It 
 **Example spectrum (examples/):**
 01-modal-shift → 02-todo-drift → 03-api-contract → 04-prompt-policy → 05-hydra-doc-drift
 
-**Test counts:** 28 engine tests + 100 CLI integration tests + 24 PR-reviewer tests + 19 narrative tests, all passing
+**Test counts:** 28 engine tests + 100 CLI integration tests + 24 PR-reviewer tests + 19 narrative tests + 11 multi-file tests, all passing
 
 ## Devlog
+
+### 2026-04-17 — Claude Opus 4.7 — Multi-file roll-up (`samediff dir`)
+
+Real docs live in directories, not file pairs. Added `samediff dir
+<left> <right>` — walks both roots, runs the existing single-file
+pipeline (analyze → DiffResult → narrative) on every matching `.md` /
+`.markdown` / `.txt` file, and produces one aggregated `MultiFileReport`
+with cross-file ranking.
+
+**Roll-up shape (`MultiFileReport`).**
+- `headline` — highest-salience top issue across all files, prefixed
+  with its file path (`api.md — Requirement reversed on idempotency: …`)
+- `severity` — max per-file severity
+- `topIssues` / `quietIssues` — `AttributedIssue[]` (an `Issue` with a
+  `file` field). Ranked by the same salience math used inside
+  buildNarrative — kind-weight × confidence × severity boost.
+- `files` — per-file `{ path, diff, narrative }`. The single-file
+  narrative inside each entry is preserved verbatim, so inspectability
+  is unchanged.
+- `notices` — files present on only one side (`added-file` /
+  `removed-file`). Surfaces structural drift that the per-file pipeline
+  can't see.
+- Stats roll-up: `fileCount`, `filesWithDrift`, `totalFindings`,
+  `maxScore`, `avgScore`.
+
+**HTML renderer (`formatMultiHtml.ts`).** Roll-up page with aggregate
+headline band, fleet stats grid (worst score / avg score / files-with-
+drift / total findings / top-issues count), structural-drift notices,
+ranked top-issues list (each card linked to the file's detail panel),
+and per-file collapsible `<details>` sections that embed the existing
+single-file HTML report in an `<iframe srcdoc>`. Same dark/light
+palette as the per-file report so the two surfaces feel like one
+artifact.
+
+**CLI surface.** New subcommand wired into `KNOWN_SUBCOMMANDS` and the
+shell wrapper's pass-through list:
+```
+samediff dir <left-dir> <right-dir>          # forensic-style summary on stdout
+samediff dir <left-dir> <right-dir> --html   # full roll-up HTML
+samediff dir <left-dir> <right-dir> --json   # complete report
+samediff dir <left-dir> <right-dir> -o file  # write to disk
+```
+The default summary is the terminal-friendly view (one-line stats +
+ranked top issues + structural drift) — no flag needed for a quick
+look. `--html` / `--json` opt into the full reports.
+
+**Demo.** New `examples/07-multi-spec/` — a fictional Aurora
+observability platform whose v2 docs (`api.md`, `runbook.md`,
+`policy.md`) quietly relax every guarantee made in v1: required fields
+become optional, SLAs replaced with aspirations, audit logging
+deferred, encryption key rotation slowed from 90 days to annual, PII
+allowed to leave the production VPC. The aggregate headline reads:
+`api.md — Requirement reversed on idempotency: \`idempotency_key\`
+(string, required) — must… vs … (string, optional) — recom…` — exactly
+the kind of accusation a reviewer needs to see in one glance.
+
+**Splash integration.** `examples/generate.sh` detects the v1/v2
+shape and routes to `samediff dir` when present. The splash card
+extractor gained fallback grep patterns (`stat-num` for score,
+`agg-headline` for headline) so multi-file reports render correctly on
+the splash alongside single-file ones.
+
+**Bug surfaced and fixed along the way.** Large `--json` output (282
+KB for 07-multi-spec) was being truncated to 64 KB on stdout because
+`process.exit(0)` raced the unflushed pipe buffer. Switched the dir
+command to `process.stdout.write(content, () => process.exit(0))` so
+exit waits for drain. Latent in single-file code too but never hit in
+practice because single-file JSON stays well under 64 KB.
+
+**Tests.** New `tools/multi-file.test.mjs` (11 tests):
+- Output shape (aggregate / files / notices / meta).
+- Walker: recurses, includes `.md`, skips dotfiles + `node_modules` /
+  `.git`.
+- Aggregation: headline pulls from highest-salience file (not
+  alphabetical); top issues ranked across files; severity = max
+  per-file severity.
+- Structural drift: files on only one side appear in `notices`; pure-
+  structural-drift case synthesises a "Structural drift: N added, M
+  removed" headline.
+- Per-file integrity: each entry carries its own `diff` + `narrative`;
+  every `AttributedIssue.file` resolves to a real per-file path.
+- End-to-end: `examples/07-multi-spec` produces 3 files with drift,
+  high/critical aggregate severity, and top issues spanning multiple
+  files.
 
 ### 2026-04-17 — Claude Opus 4.7 — Checklist semantics: status changes, not add+remove
 

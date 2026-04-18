@@ -15,7 +15,14 @@ done < <(find "${EXAMPLES_DIR}" -mindepth 1 -maxdepth 1 -type d -print0 | sort -
 
 set -x
 for d in "${EXAMPLE_DIRS[@]}"; do
-    "${SAMEDIFF_PATH}" "$d/left.md" "$d/right.md" --html --out "$d/findings.html"
+    # Multi-file examples have a v1/ + v2/ pair instead of left.md/right.md.
+    # Detect that shape and route to `samediff dir` accordingly so the same
+    # generate.sh can drive both kinds of demo.
+    if [[ -d "$d/v1" && -d "$d/v2" ]]; then
+        "${SAMEDIFF_PATH}" dir "$d/v1" "$d/v2" --html -o "$d/findings.html"
+    else
+        "${SAMEDIFF_PATH}" "$d/left.md" "$d/right.md" --html --out "$d/findings.html"
+    fi
 done
 set +x
 
@@ -106,21 +113,41 @@ HEAD
             [[ -n "$dif" ]] && difficulty="$dif"
         fi
 
+        # Try single-file shape first (`.score-num`), then fall back to
+        # the multi-file roll-up shape (`.stat-num` for the worst-score stat).
         score_line="$(grep -m1 -oE '<div class="score-num [a-z]+">[0-9.]+</div>' "$findings")" || score_line=""
+        if [[ -z "$score_line" ]]; then
+            score_line="$(grep -m1 -oE '<div class="stat-num [a-z]+">[0-9.]+</div>' "$findings")" || score_line=""
+        fi
         score_num=""
         score_level=""
         if [[ -n "$score_line" ]]; then
-            score_level="$(printf '%s' "$score_line" | sed -E 's|.*score-num ([a-z]+)".*|\1|')"
+            score_level="$(printf '%s' "$score_line" | sed -E 's|.*-num ([a-z]+)".*|\1|')"
             score_num="$(printf '%s' "$score_line" | sed -E 's|.*>([0-9.]+)</div>|\1|')"
         fi
         label_line="$(grep -m1 -oE '<div class="score-label">[^<]*</div>' "$findings")" || label_line=""
         score_label="$(printf '%s' "$label_line" | sed -E 's|<div class="score-label">([^<]*)</div>|\1|')"
+        # Multi-file fallback: synthesize a label from the worst-score class
+        if [[ -z "$score_label" && -n "$score_level" ]]; then
+            case "$score_level" in
+                critical) score_label="Critical drift" ;;
+                high)     score_label="High drift" ;;
+                moderate) score_label="Moderate drift" ;;
+                low)      score_label="Low drift" ;;
+                medium)   score_label="Moderate drift" ;;
+            esac
+        fi
 
         # Narrative headline: the top-issue title that would make an engineer
         # stop scrolling. Extracted verbatim from the generated HTML (so the
         # splash stays in sync with whatever the narrative layer produced).
         headline_line="$(grep -m1 -oE '<div class="headline-title">[^<]*</div>' "$findings")" || headline_line=""
         headline="$(printf '%s' "$headline_line" | sed -E 's|<div class="headline-title">([^<]*)</div>|\1|')"
+        # Multi-file fallback: aggregate headline lives in `.agg-headline`.
+        if [[ -z "$headline" ]]; then
+            headline_line="$(grep -m1 -oE '<div class="agg-headline">[^<]*</div>' "$findings")" || headline_line=""
+            headline="$(printf '%s' "$headline_line" | sed -E 's|<div class="agg-headline">([^<]*)</div>|\1|')"
+        fi
 
         esc_title="$(html_escape "$title")"
         esc_slug="$(html_escape "$slug")"

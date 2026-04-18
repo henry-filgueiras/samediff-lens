@@ -12,7 +12,7 @@ VALUE_FLAGS_NONPATH=("--only" "--exclude" "--fail-on" "--policy")
 VALUE_FLAGS_PATH=("-o" "--out" "--baseline" "--config")
 
 # Subcommands are pass-through tokens; don't path-resolve them.
-SUBCOMMANDS=("init" "policies" "baseline" "check")
+SUBCOMMANDS=("init" "policies" "baseline" "check" "dir")
 
 is_in() {
   local needle="$1"; shift
