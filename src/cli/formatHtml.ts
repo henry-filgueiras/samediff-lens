@@ -2,7 +2,7 @@ import type { AnalysisResult, TaskStatusChange } from "../analysis/types";
 import { computeDriftScore } from "./scoring";
 import { describeContradiction, NO_PRIOR_LINE_TEXT } from "../analysis/heuristics";
 import { buildNarrative } from "../analysis/narrative";
-import type { Issue, NarrativeReport } from "../analysis/narrative";
+import type { Issue, NarrativeReport, Thesis } from "../analysis/narrative";
 import { buildDiffResult } from "./resultModel";
 import { diffLinesWithHunks, type DiffRow, type Hunk } from "./sourceDiff";
 
@@ -261,6 +261,51 @@ export function formatHtmlReport(
   .rename-arrow { color: var(--text2); }
   .rename-to { color: var(--cyan); }
 
+  /* Macro thesis band — Tier 1 (only when "earned") */
+  .thesis-band {
+    margin: 1.5rem 0 0.5rem;
+    padding: 1.1rem 1.3rem;
+    background: linear-gradient(180deg, var(--surface2) 0%, var(--surface) 100%);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--blue);
+    border-radius: 8px;
+    position: relative;
+  }
+  .thesis-band.sev-critical { border-left-color: var(--red); }
+  .thesis-band.sev-high { border-left-color: var(--red); }
+  .thesis-band.sev-moderate { border-left-color: var(--yellow); }
+  .thesis-band.sev-low { border-left-color: var(--green); }
+  .thesis-kicker {
+    font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--text2); font-weight: 700; margin-bottom: 0.4rem;
+    display: flex; gap: 0.5rem; align-items: center;
+  }
+  .thesis-kicker .composite-tag {
+    font-size: 0.62rem; padding: 0.05rem 0.4rem; border-radius: 8px;
+    background: var(--blue); color: var(--bg); letter-spacing: 0.05em;
+  }
+  .thesis-headline {
+    font-size: 1.25rem; font-weight: 700; line-height: 1.35;
+    color: var(--text); margin-bottom: 0.4rem;
+  }
+  .thesis-subheadline {
+    font-size: 0.88rem; color: var(--text2); margin-bottom: 0.7rem;
+  }
+  .thesis-citations {
+    display: flex; flex-wrap: wrap; gap: 0.35rem;
+    margin-top: 0.65rem; padding-top: 0.65rem;
+    border-top: 1px solid var(--border);
+  }
+  .thesis-citation {
+    font-size: 0.72rem; padding: 0.18rem 0.55rem; border-radius: 4px;
+    background: var(--surface2); color: var(--text2); text-decoration: none;
+    border: 1px solid var(--border);
+    max-width: 28rem; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .thesis-citation:hover { color: var(--text); border-color: var(--blue); }
+  .thesis-citation .ck { color: var(--text2); margin-right: 0.3rem; opacity: 0.6; }
+
   /* Narrative — Top Issues */
   .narrative-headline {
     margin: 1.5rem 0 1rem; padding: 1rem 1.25rem;
@@ -472,6 +517,8 @@ export function formatHtmlReport(
     </div>
   </div>
 
+  ${renderThesis(narrative?.thesis ?? null)}
+
   ${renderNarrative(narrative)}
 
   ${renderSourceDiff(options, result)}
@@ -509,6 +556,52 @@ function card(title: string, type: string, count: number, content: string): stri
       <span class="card-count">${count}</span>
     </div>
     <div class="card-body">${content}</div>
+  </div>`;
+}
+
+/**
+ * Tier 1 — Macro thesis band. Renders only when a Thesis was earned.
+ * The headline string is verbatim from the macro catalog; the
+ * subheadline is templated with cited counts + topic list (both pulled
+ * from cited Issues, no synthesis).
+ *
+ * Citations link down to in-page Issue card anchors so a reader can
+ * follow doctrine → accusation in one click.
+ */
+function renderThesis(thesis: Thesis | null): string {
+  if (!thesis) return "";
+
+  const sev = thesis.severity;
+  const compositeTag = thesis.isComposite
+    ? `<span class="composite-tag">composite</span>`
+    : "";
+
+  // Truncate citation labels in chips, but keep them readable.
+  const citationsHtml = thesis.citedIssueIds
+    .slice(0, 6)
+    .map((id, idx) => {
+      const num = idx + 1;
+      return `<a class="thesis-citation" href="#${esc(id)}"><span class="ck">cite ${num}</span>${esc(id)}</a>`;
+    })
+    .join("");
+  const overflow = thesis.citedIssueIds.length - 6;
+  const overflowChip = overflow > 0
+    ? `<span class="thesis-citation"><span class="ck">+${overflow}</span>more</span>`
+    : "";
+
+  return `
+  <div class="thesis-band sev-${esc(sev)}">
+    <div class="thesis-kicker">
+      <span>Thesis</span>
+      ${compositeTag}
+      <span style="opacity:0.6">\u00b7 ${esc(thesis.confidence)} confidence</span>
+    </div>
+    <div class="thesis-headline">${esc(thesis.headline)}</div>
+    <div class="thesis-subheadline">${esc(thesis.subheadline)}</div>
+    <div class="thesis-citations">
+      ${citationsHtml}
+      ${overflowChip}
+    </div>
   </div>`;
 }
 
@@ -580,7 +673,7 @@ function renderIssue(issue: Issue): string {
     : "";
 
   return `
-    <div class="issue sev-${esc(sev)}">
+    <div class="issue sev-${esc(sev)}" id="${esc(issue.id)}">
       <div class="issue-title">${esc(issue.title)}</div>
       <div class="issue-lede">${esc(issue.lede)}</div>
       <div class="issue-badges">

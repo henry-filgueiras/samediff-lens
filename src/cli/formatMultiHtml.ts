@@ -10,6 +10,7 @@
  */
 
 import type { MultiFileReport, AttributedIssue } from "./multiFile";
+import type { Thesis } from "../analysis/narrative";
 import type { DiffResult } from "./resultModel";
 import { formatHtmlReport } from "./formatHtml";
 
@@ -146,6 +147,49 @@ export function formatMultiHtmlReport(report: MultiFileReport): string {
   .agg-headline {
     font-size: 1.1rem; font-weight: 600; line-height: 1.4;
   }
+
+  /* Aggregate thesis band — Tier 1 above the issue-level headline */
+  .agg-thesis {
+    margin: 1.25rem 0 0.5rem;
+    padding: 1.1rem 1.3rem;
+    background: linear-gradient(180deg, var(--surface2) 0%, var(--surface) 100%);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--blue);
+    border-radius: 8px;
+  }
+  .agg-thesis.sev-critical { border-left-color: var(--red); }
+  .agg-thesis.sev-high { border-left-color: var(--red); }
+  .agg-thesis.sev-moderate { border-left-color: var(--yellow); }
+  .agg-thesis.sev-low { border-left-color: var(--green); }
+  .agg-thesis-kicker {
+    font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--text2); font-weight: 700; margin-bottom: 0.4rem;
+    display: flex; gap: 0.5rem; align-items: center;
+  }
+  .agg-thesis-kicker .composite-tag {
+    font-size: 0.62rem; padding: 0.05rem 0.4rem; border-radius: 8px;
+    background: var(--blue); color: var(--bg); letter-spacing: 0.05em;
+  }
+  .agg-thesis-headline {
+    font-size: 1.3rem; font-weight: 700; line-height: 1.35;
+    color: var(--text); margin-bottom: 0.4rem;
+  }
+  .agg-thesis-sub {
+    font-size: 0.9rem; color: var(--text2); margin-bottom: 0.7rem;
+  }
+  .agg-thesis-citations {
+    display: flex; flex-wrap: wrap; gap: 0.35rem;
+    margin-top: 0.65rem; padding-top: 0.65rem;
+    border-top: 1px solid var(--border);
+  }
+  .agg-thesis-citation {
+    font-size: 0.72rem; padding: 0.18rem 0.55rem; border-radius: 4px;
+    background: var(--surface2); color: var(--text2);
+    border: 1px solid var(--border);
+    max-width: 32rem; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .agg-thesis-citation .ck { color: var(--text2); margin-right: 0.3rem; opacity: 0.6; }
 
   .stats {
     display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
@@ -285,6 +329,8 @@ export function formatMultiHtmlReport(report: MultiFileReport): string {
   </div>
 </div>
 
+${renderAggThesis(report.aggregate.thesis)}
+
 <div class="agg-bar ${sev}">
   <div class="agg-kicker">${esc(sevTitle)} \u00b7 top finding across ${report.aggregate.fileCount} file${report.aggregate.fileCount === 1 ? "" : "s"}</div>
   <div class="agg-headline">${esc(report.aggregate.headline ?? "(no notable drift detected)")}</div>
@@ -329,6 +375,45 @@ ${filesHtml || "<p style=\"color:var(--text2); font-size:0.9rem;\">No comparable
 </div>
 </body>
 </html>`;
+}
+
+function renderAggThesis(thesis: Thesis | null): string {
+  if (!thesis) return "";
+
+  const sev = thesis.severity;
+  const compositeTag = thesis.isComposite
+    ? `<span class="composite-tag">composite</span>`
+    : "";
+
+  // Cited issue ids in aggregate are namespaced as "<file>#<issue-id>".
+  // The chip label is informative on its own; we don't try to deep-link
+  // into the per-file iframe (cross-frame anchor would be brittle).
+  const visible = thesis.citedIssueIds.slice(0, 6);
+  const overflow = thesis.citedIssueIds.length - visible.length;
+  const citationsHtml = visible
+    .map((id, idx) => {
+      const num = idx + 1;
+      return `<span class="agg-thesis-citation"><span class="ck">cite ${num}</span>${esc(id)}</span>`;
+    })
+    .join("");
+  const overflowChip = overflow > 0
+    ? `<span class="agg-thesis-citation"><span class="ck">+${overflow}</span>more</span>`
+    : "";
+
+  return `
+<div class="agg-thesis sev-${esc(sev)}">
+  <div class="agg-thesis-kicker">
+    <span>Thesis</span>
+    ${compositeTag}
+    <span style="opacity:0.6">\u00b7 ${esc(thesis.confidence)} confidence</span>
+  </div>
+  <div class="agg-thesis-headline">${esc(thesis.headline)}</div>
+  <div class="agg-thesis-sub">${esc(thesis.subheadline)}</div>
+  <div class="agg-thesis-citations">
+    ${citationsHtml}
+    ${overflowChip}
+  </div>
+</div>`;
 }
 
 function renderIssueRow(issue: AttributedIssue, fileAnchor: string | undefined): string {

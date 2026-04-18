@@ -77,4 +77,12 @@ export type NarrativeReport = {
   issues: Issue[];
   /** Below-the-fold bucket: low-salience findings still enumerated. */
   quiet: Issue[];
+  /**
+   * Macro thesis — the doctrine layer above issues. Non-null only when
+   * a coordinated pattern is "earned" (composite fires, or an atom fires
+   * with cited count ≥ minIssues AND clearly stronger than the best
+   * single issue). When null, renderers fall back to the single-issue
+   * headline. See `narrative/macro/` for the catalog.
+   */
+  thesis: import("./macro").Thesis | null;
 };

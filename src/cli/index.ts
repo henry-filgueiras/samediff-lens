@@ -733,6 +733,12 @@ function renderDirSummary(report: ReturnType<typeof runMultiFile>): string {
   lines.push(`SameDiff: ${a.fileCount} file${a.fileCount === 1 ? "" : "s"} compared, ${a.filesWithDrift} with drift`);
   lines.push(`  worst score: ${a.maxScore.toFixed(1)} (${a.severity})`);
   lines.push(`  total findings: ${a.totalFindings}`);
+  if (a.thesis) {
+    lines.push("");
+    const tag = a.thesis.isComposite ? " (composite)" : "";
+    lines.push(`THESIS${tag}: ${a.thesis.headline}`);
+    lines.push(`  ${a.thesis.subheadline}`);
+  }
   if (a.headline) {
     lines.push("");
     lines.push(`HEADLINE: ${a.headline}`);

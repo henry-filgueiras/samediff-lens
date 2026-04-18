@@ -8,3 +8,4 @@ export type {
   FindingRef,
   FindingCategory,
 } from "./types";
+export type { Thesis } from "./macro";

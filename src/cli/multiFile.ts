@@ -18,7 +18,8 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 import { analyzeTextPair } from "../analysis/analyzeTextPair";
 import { buildNarrative } from "../analysis/narrative";
-import type { Issue, NarrativeReport, Severity } from "../analysis/narrative";
+import type { Issue, NarrativeReport, Severity, Thesis } from "../analysis/narrative";
+import { buildMacroThesis } from "../analysis/narrative/macro";
 import { buildDiffResult, type DiffResult } from "./resultModel";
 
 const DEFAULT_EXTENSIONS = [".md", ".markdown", ".txt"];
@@ -90,6 +91,13 @@ export type MultiFileReport = {
     maxScore: number;
     /** Mean per-file drift score. */
     avgScore: number;
+    /**
+     * Macro thesis synthesised from issues across ALL files. Often
+     * fires more readily than per-file because cross-file coordination
+     * (security weakened in api.md AND policy.md AND runbook.md) is a
+     * stronger signal than any single file's local pattern.
+     */
+    thesis: Thesis | null;
   };
 };
 
@@ -244,6 +252,17 @@ function aggregateAcross(
     }
   }
 
+  // Aggregate thesis: feed every issue (top + quiet, across all files)
+  // into the macro pipeline. The Issue.id collision risk is real here —
+  // each per-file narrative numbers issues "issue-0", "issue-1"… so two
+  // files can share an id. Re-namespace by file path so citations
+  // remain unambiguous and the anti-hallucination test still passes.
+  const namespacedIssues = [...top, ...quiet].map((ai) => ({
+    ...ai,
+    id: `${ai.file}#${ai.id}`,
+  }));
+  const thesis = buildMacroThesis(namespacedIssues);
+
   return {
     headline,
     severity,
@@ -254,6 +273,7 @@ function aggregateAcross(
     totalFindings,
     maxScore,
     avgScore,
+    thesis,
   };
 }
 

@@ -14,6 +14,7 @@ import type { Issue, IssueKind, NarrativeReport, Severity, Confidence } from "./
 import { classifyAll, type ClassifiedFinding } from "./classify";
 import { clusterFindings, type Cluster } from "./cluster";
 import { topicBoost } from "./topics";
+import { buildMacroThesis } from "./macro";
 import {
   extractSubject,
   shortPhrase,
@@ -102,11 +103,17 @@ export function buildNarrative(diff: DiffResult): NarrativeReport {
         : top[0].title)
     : null;
 
+  // Macro thesis runs over the union of top + quiet so it can spot
+  // patterns even in below-the-fold issues (a quiet "Audit guarantee
+  // removed" still counts toward "Reliability guarantees relaxed").
+  const thesis = buildMacroThesis([...top, ...quiet]);
+
   return {
     headline,
     severity: (diff.score.label as Severity) ?? "low",
     issues: top,
     quiet,
+    thesis,
   };
 }
 

@@ -62,9 +62,104 @@ The core analysis engine in `src/analysis/` is shared between both surfaces. It 
 **Example spectrum (examples/):**
 01-modal-shift → 02-todo-drift → 03-api-contract → 04-prompt-policy → 05-hydra-doc-drift
 
-**Test counts:** 28 engine tests + 100 CLI integration tests + 24 PR-reviewer tests + 19 narrative tests + 11 multi-file tests + 13 source-diff tests, all passing (195 total)
+**Test counts:** 28 engine tests + 100 CLI integration tests + 24 PR-reviewer tests + 19 narrative tests + 11 multi-file tests + 13 source-diff tests + 11 macro-thesis tests, all passing (206 total)
 
 ## Devlog
+
+### 2026-04-17 — Claude Opus 4.7 — Macro thesis layer (doctrine above accusation)
+
+Example 06 was producing precise per-issue accusations ("Policy reversed
+on latency") that under-sold the *coordinated* drift across the doc:
+auth weakened + encryption weakened + audit deferred + SLA softened —
+all riding on "during the beta period" / "Phase 2" deferral language.
+A single-issue headline can't carry that read. Added a macro layer that
+synthesises a Thesis above the existing Issue layer.
+
+**Three-tier doctrine** (theory → accusation → proof):
+- Tier 1: **Thesis** — macro pattern, optional, only when earned
+- Tier 2: **Issue** — strongest single accusation, always present
+- Tier 3: **Finding** — raw evidence with provenance, always present
+
+**Anti-hallucination via fixed catalog.** Macro headlines come from a
+hand-tuned table in `src/analysis/narrative/macro/`:
+
+- `atoms.ts` — 5 atomic themes (security-weakened,
+  compliance-protections-relaxed, reliability-guarantees-removed,
+  performance-commitments-softened, staging-deferral-pattern). Each
+  has a fixed headline string and a deterministic `matches(issue)`
+  predicate. Atoms need ≥3 cited Issues to fire.
+- `composites.ts` — 6 composite themes that fire when two atoms both
+  reach ≥2 cited Issues each AND the union is ≥3. Composite
+  headlines are also fixed strings, e.g. "Compliance controls
+  relaxed for beta rollout", "Reliability traded for rollout
+  speed", "Production guarantees broadly weakened".
+- `topicCategories.ts` — topic noun → family mapping (security /
+  compliance / reliability / performance) plus the staging-deferral
+  regex. Topics deliberately overlap (audit ∈ {reliability,
+  compliance}; encryption ∈ {security, compliance}) so cross-family
+  composites can pick up the natural cross.
+- `directions.ts` — issue → "weakening" | "tightening" | "neutral"
+  derived from kind, with required↔optional and modal-strength flips
+  read off the evidence text verbatim.
+
+**Earned threshold.** Macro never appears unless it's clearly stronger
+than the best single issue:
+- Composites get a free pass — their per-atom + union floors already
+  encode coordination across themes
+- Atom-only candidates must have salience ≥ 1.4× the top single
+  issue, else the macro layer stays silent and Tier 2 carries the
+  report
+
+The result: examples 01–05 don't fire any thesis (their drift is
+strong but not coordinated across themes), so the punchy per-issue
+headlines stay in place. Example 06 fires "Compliance controls
+relaxed for beta rollout" with 7 cited issues spanning audit +
+encryption. Example 07 (multi-file) fires "Reliability traded for
+rollout speed" with 9 cited issues spanning all three files.
+
+**Citations are issue-id-only.** Thesis stores `citedIssueIds:
+string[]` referring to `Issue.id` values, not finding refs. The chain
+stays explicit — thesis cites issues, issues cite findings. Visible
+provenance, no skipping levels. Issue cards in the HTML now carry
+`id="issue-N"` anchors so citation chips on the thesis band link
+straight to the supporting accusation below.
+
+**Subheadline templating.** The only synthesised text is the
+"Driven by N issues across {topic, topic, topic}" line, where N is
+the cited count and the topic list is pulled verbatim from cited
+issues' subjects. Test enforces that every word in `evidenceTopics`
+appears in some cited issue.
+
+**Multi-file aggregate.** `runMultiFile` runs the macro pipeline over
+the union of every per-file `top + quiet` issues, with ids namespaced
+to `<file>#<issue-id>` so they remain unique. Cross-file coordination
+is often the strongest signal — the 07 demo fires a high-confidence
+composite from issues spread across api.md / runbook.md / policy.md.
+
+**Renderers.** `formatHtml.ts` adds a thesis-band block (gradient
+background, severity-tinted left border, citation chips) above the
+existing narrative-headline block. `formatMultiHtml.ts` mirrors it
+on the aggregate page. The terminal `samediff dir` summary prints
+a `THESIS:` line above the existing `HEADLINE:` line. Splash card
+extractor (`examples/generate.sh`) prefers the thesis headline over
+the per-issue headline when one exists.
+
+**Two intentional gaps** documented in `atoms.ts`:
+- Ownership-shift theme — needs ownership/role detection that
+  doesn't exist in the engine yet (no `subject = team-name`)
+- Tightening composites (mirror of weakening side) — easy to add
+  later but the user-facing examples were all weakening cases
+
+**Tests** — 11 in `tools/macro-thesis.test.mjs`:
+- Anti-hallucination: every cited id resolves to a real Issue;
+  every word in the macro headline appears in the fixed catalog;
+  every evidence topic appears verbatim in some cited issue
+- Conservative thresholds: single weakenings don't fire; scattered
+  drift doesn't fire
+- 06-secure-gateway end-to-end: composite fires, severity high or
+  critical, single-issue headline preserved underneath
+- Multi-file: aggregate composite fires, file-namespaced ids
+  resolve, atom-only paths conform to catalog
 
 ### 2026-04-17 — Claude Opus 4.7 — Embedded source diff with finding cross-tags
 

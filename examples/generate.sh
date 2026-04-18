@@ -138,16 +138,19 @@ HEAD
             esac
         fi
 
-        # Narrative headline: the top-issue title that would make an engineer
-        # stop scrolling. Extracted verbatim from the generated HTML (so the
-        # splash stays in sync with whatever the narrative layer produced).
-        headline_line="$(grep -m1 -oE '<div class="headline-title">[^<]*</div>' "$findings")" || headline_line=""
-        headline="$(printf '%s' "$headline_line" | sed -E 's|<div class="headline-title">([^<]*)</div>|\1|')"
-        # Multi-file fallback: aggregate headline lives in `.agg-headline`.
-        if [[ -z "$headline" ]]; then
-            headline_line="$(grep -m1 -oE '<div class="agg-headline">[^<]*</div>' "$findings")" || headline_line=""
-            headline="$(printf '%s' "$headline_line" | sed -E 's|<div class="agg-headline">([^<]*)</div>|\1|')"
-        fi
+        # Headline priority: macro thesis (doctrine) > narrative headline
+        # (accusation) > aggregate file headline (multi-file fallback).
+        # The thesis is the highest-level synthesis when one fires; we
+        # prefer it for the splash because that's literally "what an
+        # engineer would say after reading the whole diff".
+        headline=""
+        for cls in "thesis-headline" "agg-thesis-headline" "headline-title" "agg-headline"; do
+            line="$(grep -m1 -oE "<div class=\"$cls\">[^<]*</div>" "$findings")" || line=""
+            if [[ -n "$line" ]]; then
+                headline="$(printf '%s' "$line" | sed -E "s|<div class=\"$cls\">([^<]*)</div>|\\1|")"
+                break
+            fi
+        done
 
         esc_title="$(html_escape "$title")"
         esc_slug="$(html_escape "$slug")"
