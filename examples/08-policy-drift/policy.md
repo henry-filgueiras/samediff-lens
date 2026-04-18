@@ -1,85 +1,54 @@
 # Nimbus Notes — Privacy Policy
 
-Nimbus Notes is a note-taking service. This policy describes what data we
-collect, how we use it, and the commitments we make to you. It applies
-to every account, on every plan.
+Nimbus Notes is a note-taking service committed to handling your data
+responsibly. This policy outlines our approach.
 
-## What we collect
+## Information we collect
 
-We collect the data required to provide the service and understand
-how it is used:
+We collect the information necessary to deliver and improve our
+services, including account details, content you create, device
+information, and usage data.
 
-- **Account information** — your email address and display name.
-- **Your notes** — the content you author, and the folders you organize
-  them into.
-- **Device information** — your browser or client version, used solely
-  to ship bug fixes.
-- **Product usage metrics** — anonymized events showing which features
-  are opened, to help us prioritize what to build.
+## How we protect your information
 
-We do not collect advertising identifiers.
+We apply industry-standard security controls, including encryption
+in transit and encryption of data stored in our production systems.
+We regularly review our practices to align with evolving best
+practice.
 
-## How your notes are stored
+## How we share information
 
-Notes are encrypted in our primary database using AES-256. Data
-moving between your client and our servers is encrypted in transit
-using TLS 1.2 or later. Database backups are stored in encrypted
-form by our cloud provider. System logs may retain note titles and
-other metadata in plaintext for up to 14 days to support debugging
-and abuse investigations.
+We may share information with service providers, partners, and
+affiliates who support our operations, as well as for analytics,
+research, and advertising purposes. We do not sell personal data
+that directly identifies you.
 
-## Sharing
+## Data retention
 
-We may share anonymized, aggregated data with trusted research and
-advertising partners to support product improvement and the continued
-free tier. We do not sell data that directly identifies you as an
-individual. Analytics providers (Mixpanel and PostHog) continue to
-receive anonymized product usage metrics under contract.
+We retain information for as long as reasonably necessary to
+operate the service, meet legal obligations, and resolve disputes.
 
-## Retention
+## AI-assisted features
 
-Deleted notes are purged from our systems within 24 hours. If you
-delete your account, every byte associated with it — notes, metadata,
-backups — is removed within 30 days.
+When you use AI-assisted features, content you submit may be
+processed by third-party inference providers and used to evaluate
+and improve service quality.
 
 ## Security incidents
 
-We will notify affected users of a confirmed data breach within 72
-hours of discovery, where legally required. Notifications will be
-sent to the email address on file and will describe the categories
-of data involved and the steps we are taking in response.
+Where legally required, we will notify affected users of a
+confirmed data breach within the timeframes set out in applicable
+law.
 
-## AI features
+## Your choices
 
-Nimbus AI offers optional summarization and rewriting of your notes.
-When you use an AI feature, the content of the note being processed
-is sent to our inference provider for generation. Prompt and response
-pairs may be retained for up to 30 days to evaluate and improve model
-quality.
+You can access, update, or delete your account information through
+your account settings. Residents of jurisdictions with applicable
+data-protection regimes (including the EU, UK, and California) may
+have additional rights; please contact privacy@nimbus.co to exercise
+them.
 
-## Your rights
+## Updates
 
-You may export every note you have ever written, in its original form,
-at any time. You may delete your account at any time, and we will
-comply immediately.
-
-Under the EU General Data Protection Regulation (GDPR) and comparable
-regimes, you additionally have the right to:
-
-- **Access** — request a copy of any personal data we hold about you.
-- **Rectification** — ask us to correct inaccurate account information.
-- **Erasure** — ask us to delete your account and all associated data.
-- **Portability** — receive your notes in a structured, machine-readable
-  format.
-- **Objection** — object to the processing of your personal data for
-  product analytics, and continue using the service without it.
-- **Complaint** — lodge a complaint with your local supervisory
-  authority.
-
-Requests under these rights should be sent to privacy@nimbus.co, and
-we will respond within 30 days.
-
-## Changes to this policy
-
-If we change this policy, we will notify every active user by email,
-at least 30 days before any change takes effect.
+We may update this policy from time to time. Material changes will
+be communicated through the service or other appropriate means.
