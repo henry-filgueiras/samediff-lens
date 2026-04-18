@@ -260,6 +260,50 @@ test("--git <old> <new> -- with missing newer ref gives clean error", () => {
   }
 });
 
+// ── Empty-tree SHA — diff "from nothing" ───────────────────────────────────
+
+test("--git EMPTY HEAD -- file diffs from empty content (everything appears as added)", () => {
+  // No engine errors, no contradictions (you can't contradict
+  // empty), and the rendered summary should advertise the empty-tree
+  // short-SHA on the before side.
+  const output = run("--git", "EMPTY", "HEAD", "--", "examples/01-modal-shift/right.md");
+  assert.match(output, /SameDiff Summary/);
+  assert.match(output, /4b825dc:examples\/01-modal-shift\/right\.md/);
+  assert.match(output, /ADDED CONCEPTS/);
+  // Empty side cannot produce contradictions or commitment shifts
+  assert.doesNotMatch(output, /POSSIBLE CONTRADICTIONS/);
+  assert.doesNotMatch(output, /COMMITMENT SHIFTS/);
+});
+
+test("--git accepts the full empty-tree SHA verbatim", () => {
+  const output = run(
+    "--git",
+    "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+    "HEAD",
+    "--",
+    "examples/01-modal-shift/right.md",
+  );
+  assert.match(output, /SameDiff Summary/);
+  assert.match(output, /4b825dc:/);
+});
+
+test("--git EMPTY-TREE alias is case-insensitive", () => {
+  const upper = run("--git", "EMPTY-TREE", "HEAD", "--", "examples/01-modal-shift/right.md");
+  const lower = run("--git", "empty-tree", "HEAD", "--", "examples/01-modal-shift/right.md");
+  // Both should produce the same SameDiff summary banner
+  assert.match(upper, /SameDiff Summary/);
+  assert.match(lower, /SameDiff Summary/);
+});
+
+test("--git EMPTY HEAD -- file --json marks the before-side gitRef as the empty tree", () => {
+  const output = run("--git", "EMPTY", "HEAD", "--", "examples/01-modal-shift/right.md", "--json");
+  const result = JSON.parse(output);
+  // The label uses the short SHA prefix (4b825dc) regardless of
+  // which alias was passed.
+  assert.match(result.input.left.gitRef ?? "", /4b825dc/);
+  assert.equal(result.input.right.gitRef, "HEAD");
+});
+
 // --- JSON output tests ---
 
 test("--json emits valid parseable JSON", () => {

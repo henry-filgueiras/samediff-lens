@@ -3,12 +3,38 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 /**
+ * Git's well-known empty-tree SHA. Used by convention to mean "nothing"
+ * — diffing against it shows what was *added* in the very first commit
+ * for a path. Hard-coded on the git side too:
+ *   git hash-object -t tree /dev/null  → 4b825dc642cb6eb9a060e54bf8d69288fbee4904
+ */
+const EMPTY_TREE_SHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
+/**
+ * Friendly aliases for the empty tree. Case-insensitive.
+ * `samediff --git EMPTY HEAD -- file.md` is more readable than typing
+ * the full 40-char SHA.
+ */
+const EMPTY_TREE_ALIASES = new Set([
+  "empty",
+  "empty-tree",
+  "emptytree",
+]);
+
+function isEmptyTreeRef(ref: string): boolean {
+  if (ref === EMPTY_TREE_SHA) return true;
+  if (EMPTY_TREE_ALIASES.has(ref.toLowerCase())) return true;
+  return false;
+}
+
+/**
  * Resolve a git ref:path spec to file contents.
  *
  * Supports:
  *   "HEAD~1:path/to/file.md"  → git show HEAD~1:path/to/file.md
  *   "main:file.md"            → git show main:file.md
  *   "abc123:file.md"          → git show abc123:file.md
+ *   "EMPTY:file.md"           → empty content (the git empty-tree SHA)
  *
  * If no colon is present, treats it as a plain file path.
  */
@@ -28,6 +54,14 @@ export function resolveGitRef(spec: string, cwd: string): { text: string; label:
 
   if (!ref || !path) {
     throw new Error(`Invalid git ref spec: "${spec}". Expected format: REF:path/to/file`);
+  }
+
+  // Empty-tree short-circuit: any path in the empty tree resolves to
+  // empty content. Saves an exec + makes "diff against nothing" a
+  // first-class case (useful for showing the delta of the very first
+  // commit for a file).
+  if (isEmptyTreeRef(ref)) {
+    return { text: "", label: `${EMPTY_TREE_SHA.slice(0, 7)}:${path}` };
   }
 
   try {

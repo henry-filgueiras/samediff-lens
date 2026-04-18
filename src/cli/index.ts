@@ -56,6 +56,10 @@ Usage:
   samediff --git <old> <new> -- <file>     Compare old:file vs new:file
                                              (no working tree involved;
                                               loop over files in shell)
+                                           ref can be EMPTY (or the
+                                           4b825dc6... empty-tree SHA)
+                                           to diff "from nothing" — useful
+                                           for showing a file's first commit
 
   samediff init [--force]                  Write a starter .samediff.json
   samediff policies                        List available policies

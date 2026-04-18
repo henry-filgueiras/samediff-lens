@@ -62,9 +62,46 @@ The core analysis engine in `src/analysis/` is shared between both surfaces. It 
 **Example spectrum (examples/):**
 01-modal-shift → 02-todo-drift → 03-api-contract → 04-prompt-policy → 05-hydra-doc-drift
 
-**Test counts:** 28 engine tests + 105 CLI integration tests + 24 PR-reviewer tests + 19 narrative tests + 11 multi-file tests + 13 source-diff tests + 11 macro-thesis tests, all passing (211 total)
+**Test counts:** 28 engine tests + 109 CLI integration tests + 24 PR-reviewer tests + 19 narrative tests + 11 multi-file tests + 13 source-diff tests + 11 macro-thesis tests, all passing (215 total)
 
 ## Devlog
+
+### 2026-04-17 — Claude Opus 4.7 — Empty-tree SHA support (diff "from nothing")
+
+`git show 4b825dc6...:file.md` errors with "path doesn't exist in
+this tree", which meant `samediff --git 4b825dc6... HEAD -- file.md`
+also errored. The empty-tree SHA is the standard idiom for "diff
+against nothing" — useful for showing the delta a file's *first*
+commit introduced — so it's worth handling as a first-class case.
+
+`resolveGitRef` now short-circuits when the ref is the canonical
+empty-tree SHA (`4b825dc642cb6eb9a060e54bf8d69288fbee4904`) and
+returns empty content for any path. Friendly aliases accepted
+(case-insensitive): `EMPTY`, `EMPTY-TREE`, `EMPTYTREE`. The label
+on the resulting input always normalizes to the short SHA prefix
+(`4b825dc:<path>`) regardless of which form the user typed, so
+output reproducibility doesn't depend on alias choice.
+
+Engine-side: `analyzeTextPair` already handles a single empty side
+naturally — empty `extractUnits` yields no pairs, no contradictions,
+no commitment shifts. Everything in the non-empty side surfaces as
+added concepts / added action items. The drift score reflects pure
+addition (lower than a same-size mutation diff would be, which is
+correct: adding from scratch is less disruptive than overwriting).
+
+Use case:
+```bash
+# Show the first-commit delta for a file
+samediff --git EMPTY HEAD -- src/cli/sourceDiff.ts
+
+# Pair with the multi-file pattern to baseline a whole directory
+for f in $(git ls-files docs/); do
+  samediff --git EMPTY HEAD -- "$f" --score
+done
+```
+
+Four new CLI tests cover: full SHA, EMPTY alias, case-insensitive
+EMPTY-TREE, and JSON output preserving the short-SHA label.
 
 ### 2026-04-17 — Claude Opus 4.7 — Dogfood cleanup: imperative shape + `**Topic:**` sections + stricter cross-section floor
 
