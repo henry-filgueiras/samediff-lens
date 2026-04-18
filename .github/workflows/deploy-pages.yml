@@ -22,6 +22,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          # Full history so `samediff history` can walk every commit
+          # that touched a tracked example file (08-policy-drift).
+          # Default is fetch-depth: 1, which would hand history one
+          # commit and produce an empty trajectory page.
+          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v6

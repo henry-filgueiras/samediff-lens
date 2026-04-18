@@ -75,6 +75,22 @@ Three example shapes, all driven by `examples/generate.sh`:
 
 ## Devlog
 
+### 2026-04-18 — Claude Opus 4.7 — Pages checkout depth fix
+
+First Pages deploy of 08-policy-drift published a 0-transition page
+(all stats zero, "no steps to chart"). Cause: `actions/checkout@v5`
+defaults to `fetch-depth: 1`, so the runner had only the tip commit
+of `policy.md`; `samediff history` walked one commit, found no
+transitions, and emitted a valid-but-empty index. Fix is a single
+`fetch-depth: 0` on the checkout step in `deploy-pages.yml`. The
+existing pair/dir-pair examples were unaffected because those don't
+read git history.
+
+**How to catch this kind of thing earlier:** `samediff history`
+already logs `N transitions` to stderr — visible in the Actions log
+for the "Generate example reports" step. Worth eyeballing on the
+first deploy of any new history-shape example.
+
 ### 2026-04-18 — Claude Opus 4.7 — Git-history example (08-policy-drift)
 
 Added `examples/08-policy-drift/` — a "Nimbus Notes" privacy policy
