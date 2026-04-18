@@ -171,6 +171,11 @@ HEAD
 
     cat <<'TAIL'
 </div>
+<footer style="margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--border); color: var(--text2); font-size: 0.85rem; text-align: center;">
+  <a href="../" style="color: var(--blue); text-decoration: none; margin: 0 0.6rem;">&larr; Back to SameDiff Lens</a>
+  <span>&middot;</span>
+  <a href="https://github.com/henry-filgueiras/samediff-lens" style="color: var(--blue); text-decoration: none; margin: 0 0.6rem;">View source on GitHub</a>
+</footer>
 </body>
 </html>
 TAIL

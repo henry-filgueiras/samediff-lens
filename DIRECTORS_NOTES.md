@@ -66,6 +66,50 @@ The core analysis engine in `src/analysis/` is shared between both surfaces. It 
 
 ## Devlog
 
+### 2026-04-17 — Claude Opus 4.7 — Pages publishes the example reports
+
+Until now, the generated `findings.html` files lived only on a
+contributor's local checkout. Anyone wanting to see them had to clone
+the repo, install Node, and run the tool. The GitHub UI doesn't
+render `.html` source files, so even committing them would have shown
+up as raw markup in the file browser.
+
+Folded report generation into the existing `deploy-pages.yml`
+workflow instead. New steps after the existing `npm run build`:
+
+1. `npm run build:cli` — compile the CLI used by `examples/generate.sh`
+2. `bash examples/generate.sh` — produce every `findings.html`
+3. Stage step — mirror every `examples/**/*.html` into `dist/examples/`
+   and copy the source `*.md` alongside so a curious reader can compare
+   the rendered report against the input that produced it
+
+The existing `actions/upload-pages-artifact@v4` step already uploads
+`dist/`, so no new permissions or secrets needed. After the next push
+to `main`, the live URLs become:
+
+- `<pages>/examples/findings.html` — the splash with all 7 example cards
+- `<pages>/examples/<slug>/findings.html` — each per-example forensic report
+- `<pages>/examples/07-multi-spec/findings.html` — the multi-file roll-up
+- `<pages>/examples/<slug>/{left,right}.md` — the source files
+
+Deliberately did NOT add a pre-commit hook for this:
+- `examples/.gitignore` excludes `*.html` for a reason — checking
+  them into git would bloat every commit by 100KB+
+- The Pages action runs on every push to main, so the live reports
+  stay in sync without contributor friction
+- Pre-commit hooks can be skipped with `--no-verify`, the CI gate
+  cannot
+
+**Discoverability.** Two small bidirectional links so a visitor can
+navigate between the live React app and the generated examples:
+- App footer (`src/App.tsx`) gains a "Browse generated example reports"
+  link pointing to `./examples/findings.html`
+- Splash page footer (`examples/generate.sh`) gains a "← Back to
+  SameDiff Lens" link pointing to `../`
+
+Both are relative URLs that resolve correctly under the deployed
+Pages base path (`/samediff-lens/`).
+
 ### 2026-04-17 — Claude Opus 4.7 — Multi-file roll-up (`samediff dir`)
 
 Real docs live in directories, not file pairs. Added `samediff dir

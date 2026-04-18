@@ -274,6 +274,7 @@ function App() {
 
       <footer className="app-footer">
         <span>SameDiff Lens is heuristic / experimental.</span>
+        <a href="./examples/findings.html">Browse generated example reports</a>
         <a
           href="https://github.com/henry-filgueiras/samediff-lens"
           target="_blank"

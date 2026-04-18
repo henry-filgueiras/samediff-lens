@@ -49,6 +49,39 @@ jobs:
         env:
           VITE_BASE_PATH: ${{ steps.base-path.outputs.vite_base_path }}
 
+      # Build the CLI and generate the example reports so they ship with
+      # the Pages site. End-users get to inspect the rendered HTML at
+      # `<pages-url>/examples/findings.html` (the splash) and at
+      # `<pages-url>/examples/<slug>/findings.html` per example, without
+      # cloning or installing anything.
+      - name: Build CLI
+        run: npm run build:cli
+
+      - name: Generate example reports
+        run: bash examples/generate.sh
+
+      # Mirror every generated *.html under examples/ into dist/examples/
+      # so the existing upload-pages-artifact step picks them up.
+      - name: Stage example reports into dist
+        run: |
+          set -euo pipefail
+          mkdir -p dist/examples
+          while IFS= read -r -d '' f; do
+            rel="${f#examples/}"
+            dest="dist/examples/$rel"
+            mkdir -p "$(dirname "$dest")"
+            cp "$f" "$dest"
+          done < <(find examples -type f -name '*.html' -print0)
+          # Also copy each example's README.md and the source markdown so a
+          # curious reader can compare the rendered report against the input.
+          while IFS= read -r -d '' f; do
+            rel="${f#examples/}"
+            dest="dist/examples/$rel"
+            mkdir -p "$(dirname "$dest")"
+            cp "$f" "$dest"
+          done < <(find examples -type f \( -name '*.md' -o -name '*.markdown' \) -print0)
+          echo "Staged $(find dist/examples -type f | wc -l | tr -d ' ') files into dist/examples/"
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v4
         with:
