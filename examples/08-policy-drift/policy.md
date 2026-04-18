@@ -30,9 +30,11 @@ and abuse investigations.
 
 ## Sharing
 
-We will never sell your data. We share anonymized product usage
-metrics with our analytics providers (Mixpanel and PostHog) to
-understand feature adoption.
+We may share anonymized, aggregated data with trusted research and
+advertising partners to support product improvement and the continued
+free tier. We do not sell data that directly identifies you as an
+individual. Analytics providers (Mixpanel and PostHog) continue to
+receive anonymized product usage metrics under contract.
 
 ## Retention
 
