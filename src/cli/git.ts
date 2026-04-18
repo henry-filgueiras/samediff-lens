@@ -46,12 +46,18 @@ export function resolveGitRef(spec: string, cwd: string): { text: string; label:
 
 /**
  * Parse the special --git syntax:
+ *
  *   samediff --git <ref> -- <file> [<file2>]
+ *     1 ref:  compare ref:file vs working copy (or ref:file1 vs working copy of file2)
  *
- * If one file is given:  compare ref:file against working copy of file
- * If two files are given: compare ref:file1 against ref:file2
+ *   samediff --git <ref-old> <ref-new> -- <file> [<file2>]
+ *     2 refs: compare ref-old:file vs ref-new:file
+ *             (or ref-old:file1 vs ref-new:file2 for rename tracking)
  *
- * Returns the two specs to resolve.
+ * The 2-ref form lets you script "compare these N files between two
+ * commits" without checking out either revision into the working tree.
+ *
+ * Returns the two specs to feed into resolveGitRef.
  */
 export function parseGitArgs(args: string[]): { specA: string; specB: string } | null {
   const gitIdx = args.indexOf("--git");
@@ -59,24 +65,41 @@ export function parseGitArgs(args: string[]): { specA: string; specB: string } |
 
   const dashIdx = args.indexOf("--", gitIdx + 1);
   if (dashIdx === -1) {
-    throw new Error("--git requires -- separator. Usage: samediff --git <ref> -- <file> [<file2>]");
+    throw new Error("--git requires -- separator. Usage: samediff --git <ref> [<ref2>] -- <file> [<file2>]");
   }
 
-  const ref = args.slice(gitIdx + 1, dashIdx).filter((a) => !a.startsWith("-"))[0];
-  if (!ref) {
+  const refs = args.slice(gitIdx + 1, dashIdx).filter((a) => !a.startsWith("-"));
+  if (refs.length === 0) {
     throw new Error("--git requires a ref (e.g., HEAD~1, main, abc123)");
+  }
+  if (refs.length > 2) {
+    throw new Error(
+      `--git takes 1 or 2 refs, got ${refs.length}: ${refs.join(", ")}. ` +
+      "Usage: samediff --git <ref> [<ref2>] -- <file> [<file2>]",
+    );
   }
 
   const files = args.slice(dashIdx + 1).filter((a) => !a.startsWith("-"));
   if (files.length === 0) {
-    throw new Error("No file specified after --. Usage: samediff --git <ref> -- <file>");
+    throw new Error("No file specified after --. Usage: samediff --git <ref> [<ref2>] -- <file>");
   }
 
+  if (refs.length === 1) {
+    const ref = refs[0];
+    if (files.length === 1) {
+      // Compare ref:file against working copy
+      return { specA: `${ref}:${files[0]}`, specB: files[0] };
+    }
+    // Two files: compare ref:file1 against working copy of file2
+    return { specA: `${ref}:${files[0]}`, specB: files[1] };
+  }
+
+  // Two refs: compare ref-old:file against ref-new:file (no working tree
+  // involved). Useful for scripting bulk comparisons between commits.
+  const [oldRef, newRef] = refs;
   if (files.length === 1) {
-    // Compare ref:file against working copy
-    return { specA: `${ref}:${files[0]}`, specB: files[0] };
+    return { specA: `${oldRef}:${files[0]}`, specB: `${newRef}:${files[0]}` };
   }
-
-  // Compare ref:file1 against ref:file2 (or working copies)
-  return { specA: `${ref}:${files[0]}`, specB: files[1] };
+  // Rename tracking: file path differs between the two refs.
+  return { specA: `${oldRef}:${files[0]}`, specB: `${newRef}:${files[1]}` };
 }

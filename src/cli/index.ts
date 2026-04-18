@@ -52,7 +52,10 @@ Usage:
   samediff <left> <right>                  Compare two files
   samediff check <left> <right>            Same, explicit form
   samediff - <right> | samediff <left> -   Read one side from stdin
-  samediff --git <ref> -- <file>           Compare against a git ref
+  samediff --git <ref> -- <file>           Compare ref:file vs working copy
+  samediff --git <old> <new> -- <file>     Compare old:file vs new:file
+                                             (no working tree involved;
+                                              loop over files in shell)
 
   samediff init [--force]                  Write a starter .samediff.json
   samediff policies                        List available policies

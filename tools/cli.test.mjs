@@ -206,6 +206,60 @@ test("--git with missing ref gives clean error", () => {
   }
 });
 
+// ── Two-ref form: compare ref-old:file vs ref-new:file ─────────────────────
+
+test("--git <old> <new> -- file compares two refs without touching working tree", () => {
+  // HEAD vs HEAD: same content on both sides → low / zero drift, but the
+  // command must succeed and the labels must show both refs.
+  const output = run("--git", "HEAD", "HEAD", "--", "examples/01-modal-shift/left.md");
+  assert.match(output, /SameDiff Summary/);
+  // Both labels should be ref-prefixed (this is how the runner prints labels)
+  assert.match(output, /HEAD:examples\/01-modal-shift\/left\.md/);
+});
+
+test("--git <old> <new> -- file --json puts both gitRef fields on input", () => {
+  const output = run("--git", "HEAD", "HEAD", "--", "examples/01-modal-shift/left.md", "--json");
+  const result = JSON.parse(output);
+  assert.equal(result.input.left.gitRef, "HEAD");
+  assert.equal(result.input.right.gitRef, "HEAD");
+  // Both paths should be the same file
+  assert.equal(result.input.left.path, result.input.right.path);
+});
+
+test("--git <old> <new> -- file1 file2 supports rename tracking", () => {
+  // Same content, just two different file paths. The pipeline should
+  // wire ref-old:file1 vs ref-new:file2 and not crash.
+  const output = run(
+    "--git", "HEAD", "HEAD", "--",
+    "examples/01-modal-shift/left.md",
+    "examples/01-modal-shift/right.md",
+    "--json",
+  );
+  const result = JSON.parse(output);
+  assert.equal(result.input.left.gitRef, "HEAD");
+  assert.equal(result.input.right.gitRef, "HEAD");
+  assert.match(result.input.left.path, /left\.md$/);
+  assert.match(result.input.right.path, /right\.md$/);
+});
+
+test("--git takes at most 2 refs", () => {
+  try {
+    run("--git", "HEAD", "HEAD~1", "HEAD~2", "--", "examples/01-modal-shift/left.md");
+    assert.fail("Expected error for >2 refs");
+  } catch (err) {
+    assert.match(err.stderr ?? err.message, /takes 1 or 2 refs/i);
+  }
+});
+
+test("--git <old> <new> -- with missing newer ref gives clean error", () => {
+  try {
+    run("--git", "HEAD", "nonexistent-ref-xyz789", "--", "examples/01-modal-shift/left.md");
+    assert.fail("Expected error for missing ref");
+  } catch (err) {
+    assert.match(err.stderr ?? err.message, /cannot read|Failed to read/i);
+  }
+});
+
 // --- JSON output tests ---
 
 test("--json emits valid parseable JSON", () => {

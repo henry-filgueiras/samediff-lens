@@ -62,9 +62,56 @@ The core analysis engine in `src/analysis/` is shared between both surfaces. It 
 **Example spectrum (examples/):**
 01-modal-shift → 02-todo-drift → 03-api-contract → 04-prompt-policy → 05-hydra-doc-drift
 
-**Test counts:** 28 engine tests + 100 CLI integration tests + 24 PR-reviewer tests + 19 narrative tests + 11 multi-file tests + 13 source-diff tests + 11 macro-thesis tests, all passing (206 total)
+**Test counts:** 28 engine tests + 105 CLI integration tests + 24 PR-reviewer tests + 19 narrative tests + 11 multi-file tests + 13 source-diff tests + 11 macro-thesis tests, all passing (211 total)
 
 ## Devlog
+
+### 2026-04-17 — Claude Opus 4.7 — Two-ref --git form (no working tree needed)
+
+`--git <ref> -- <file>` only compared `ref:file` against the working
+copy, which forces a checkout dance when scripting bulk comparisons
+across commits. New form:
+
+```
+samediff --git <old> <new> -- <file> [<file2>]
+```
+
+Compares `old:file` vs `new:file` directly via `git show`. Two-file
+variant supports rename tracking: `old:file1` vs `new:file2`. The
+working tree is never read.
+
+Use case: loop over a list of files between two commits.
+```bash
+for f in docs/*.md; do
+  ./samediff --git HEAD~5 HEAD -- "$f" --json -o "reports/$(basename "$f").json"
+done
+```
+
+**Plumbing.** `parseGitArgs` now collects all non-flag tokens between
+`--git` and `--`, accepting 1 or 2 refs (rejects 3+ with a clear
+error). `resolveInputs` already had a both-sides-as-ref code path —
+the 2-ref form falls into it naturally.
+
+**Wrapper bug fixed alongside.** The bash `samediff` wrapper was
+unconditionally path-resolving everything that didn't start with `-`
+or `/`. For `--git`, that meant the ref AND the file got
+`$ORIG_DIR/`-prefixed, which broke `git show` (refs aren't paths;
+file paths must be repo-relative). The wrapper now tracks a
+`git_mode` state machine: `refs` between `--git` and `--`, `files`
+after `--`. Both pass through verbatim. Other flags after the file
+list (e.g. `-o /tmp/out.html`) still go through normal flag handling.
+
+The wrapper bug was latent — the existing test suite invokes `node
+dist-cli/cli/index.js` directly, bypassing the wrapper. Anyone
+running `./samediff --git HEAD -- file.md` from inside the repo with
+a relative path would have hit it. Both forms work end-to-end now.
+
+**Tests.** 5 new in `tools/cli.test.mjs`:
+- two-ref form succeeds and produces the right labels
+- `--json + two-ref` populates `gitRef` on both sides
+- rename-tracking variant (`<old> <new> -- file1 file2`) works
+- 3+ refs returns a clear "takes 1 or 2 refs" error
+- missing newer ref errors cleanly
 
 ### 2026-04-17 — Claude Opus 4.7 — Macro thesis layer (doctrine above accusation)
 

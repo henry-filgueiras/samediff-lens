@@ -22,8 +22,17 @@ is_in() {
 
 # Resolve file arguments to absolute paths before cd-ing into the repo.
 # Two classes of value-taking flags: paths (resolve) and non-paths (pass through).
+#
+# Special case: `--git <ref> [<ref2>] -- <file> [<file2>]`. EVERYTHING
+# inside the git block must pass through raw — the refs (HEAD~5,
+# origin/main, abc123) obviously don't get path-resolved, but the files
+# also need to stay repo-relative because `git show <ref>:<path>` only
+# accepts repo-relative paths. After the `--`, positional args are
+# files-in-git-mode (pass raw); dash-args still trigger normal flag
+# handling so things like `-o /tmp/out.html` still work.
 resolved_args=()
 skip_next_mode=none   # none | path | raw
+git_mode=none         # none | refs (between --git and --) | files (after --)
 first_positional=1    # track so we can recognize a leading subcommand
 for arg in "$@"; do
   if [[ "$skip_next_mode" == "path" ]]; then
@@ -38,6 +47,25 @@ for arg in "$@"; do
   if [[ "$skip_next_mode" == "raw" ]]; then
     resolved_args+=("$arg")
     skip_next_mode=none
+    continue
+  fi
+  # Inside the --git ref block: refs pass raw, switch to files mode on `--`.
+  if [[ "$git_mode" == "refs" ]]; then
+    resolved_args+=("$arg")
+    if [[ "$arg" == "--" ]]; then
+      git_mode=files
+    fi
+    continue
+  fi
+  # After the `--` in git mode: positional args are file paths but git
+  # needs them repo-relative, so pass raw. Dash-args fall through.
+  if [[ "$git_mode" == "files" && "$arg" != -* ]]; then
+    resolved_args+=("$arg")
+    continue
+  fi
+  if [[ "$arg" == "--git" ]]; then
+    resolved_args+=("$arg")
+    git_mode=refs
     continue
   fi
   if [[ "$arg" == -* ]]; then
