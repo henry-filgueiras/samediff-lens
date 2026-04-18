@@ -43,6 +43,22 @@ You may export every note you have ever written, in its original form,
 at any time. You may delete your account at any time, and we will
 comply immediately.
 
+Under the EU General Data Protection Regulation (GDPR) and comparable
+regimes, you additionally have the right to:
+
+- **Access** — request a copy of any personal data we hold about you.
+- **Rectification** — ask us to correct inaccurate account information.
+- **Erasure** — ask us to delete your account and all associated data.
+- **Portability** — receive your notes in a structured, machine-readable
+  format.
+- **Objection** — object to the processing of your personal data for
+  product analytics, and continue using the service without it.
+- **Complaint** — lodge a complaint with your local supervisory
+  authority.
+
+Requests under these rights should be sent to privacy@nimbus.co, and
+we will respond within 30 days.
+
 ## Changes to this policy
 
 If we change this policy, we will notify every active user by email,
