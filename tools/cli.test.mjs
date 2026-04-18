@@ -304,6 +304,51 @@ test("--git EMPTY HEAD -- file --json marks the before-side gitRef as the empty 
   assert.equal(result.input.right.gitRef, "HEAD");
 });
 
+// ── Hint: forgot --git when passing refs ───────────────────────────────────
+
+test("hint when EMPTY is passed as a positional (forgot --git)", () => {
+  // Reproduces the actual user error: ran `samediff EMPTY <sha> -- <file>`
+  // without --git. The first positional gets read as a file, fails ENOENT,
+  // and we should suggest --git in the error.
+  try {
+    run("EMPTY", "0f4d92257f6a4ed338785f851458888d2b524227", "--", "examples/01-modal-shift/right.md");
+    assert.fail("Expected failure");
+  } catch (err) {
+    const stderr = err.stderr ?? err.message ?? "";
+    assert.match(stderr, /cannot read EMPTY/, "expected the underlying ENOENT");
+    assert.match(stderr, /looks like a git ref/, "expected the --git hint");
+    assert.match(stderr, /samediff --git <ref>/, "hint should show the corrected form");
+  }
+});
+
+test("hint when a 40-char SHA is passed as a positional (forgot --git)", () => {
+  try {
+    run(
+      "examples/01-modal-shift/left.md",
+      "0f4d92257f6a4ed338785f851458888d2b524227",
+      "--",
+      "examples/01-modal-shift/right.md",
+    );
+    assert.fail("Expected failure");
+  } catch (err) {
+    const stderr = err.stderr ?? err.message ?? "";
+    assert.match(stderr, /looks like a git ref/);
+  }
+});
+
+test("no hint on plain file ENOENT (no --, no ref-shaped path)", () => {
+  // Two file paths that don't exist — should error cleanly without
+  // hinting --git. Critical: don't suggest git mode for ordinary typos.
+  try {
+    run("does-not-exist-a.md", "does-not-exist-b.md");
+    assert.fail("Expected failure");
+  } catch (err) {
+    const stderr = err.stderr ?? err.message ?? "";
+    assert.match(stderr, /cannot read/);
+    assert.doesNotMatch(stderr, /looks like a git ref/);
+  }
+});
+
 // --- JSON output tests ---
 
 test("--json emits valid parseable JSON", () => {

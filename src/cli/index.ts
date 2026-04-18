@@ -335,12 +335,14 @@ function main() {
     textA = input.readA();
   } catch (err: any) {
     console.error(`Error: cannot read ${input.labelA}${err?.message ? " — " + err.message : ""}`);
+    maybeHintGitMode(args, input.labelA);
     process.exit(1);
   }
   try {
     textB = input.readB();
   } catch (err: any) {
     console.error(`Error: cannot read ${input.labelB}${err?.message ? " — " + err.message : ""}`);
+    maybeHintGitMode(args, input.labelB);
     process.exit(1);
   }
 
@@ -531,6 +533,43 @@ function splitCats(spec: string): string[] {
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
+}
+
+/**
+ * When a file-read error happens on a path that looks like a git ref
+ * (EMPTY-alias, full or short SHA, HEAD-prefixed name) AND the user
+ * isn't already in --git mode AND a `--` separator is present in args,
+ * print a hint that they probably meant `samediff --git ...`. This
+ * catches the common typo of forgetting `--git` before `EMPTY <SHA> --
+ * <file>`.
+ */
+function maybeHintGitMode(args: string[], failedLabel: string): void {
+  if (args.includes("--git")) return;
+  if (!args.includes("--")) return;
+
+  // Strip any path prefix the wrapper may have added (e.g. ORIG_DIR/EMPTY).
+  const tail = failedLabel.split("/").pop() ?? failedLabel;
+  if (!looksLikeGitRef(tail)) return;
+
+  process.stderr.write(
+    `\nHint: \"${tail}\" looks like a git ref. Add --git before the ref(s):\n` +
+    `      samediff --git <ref> [<ref2>] -- <file>\n`,
+  );
+}
+
+const SHA_RE = /^[0-9a-f]{7,40}$/i;
+const HEAD_RE = /^HEAD(~\d+|\^+|@\{[^}]+\})?$/;
+const EMPTY_REF_ALIASES = new Set(["empty", "empty-tree", "emptytree"]);
+const EMPTY_TREE_SHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
+function looksLikeGitRef(s: string): boolean {
+  if (!s) return false;
+  if (s === EMPTY_TREE_SHA) return true;
+  if (EMPTY_REF_ALIASES.has(s.toLowerCase())) return true;
+  if (HEAD_RE.test(s)) return true;
+  // 7-40 hex chars with no dot (rules out file names like "abc1234.md")
+  if (SHA_RE.test(s) && !s.includes(".")) return true;
+  return false;
 }
 
 function resolveInputs(args: string[], cwd: string): ResolvedInput {
