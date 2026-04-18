@@ -42,6 +42,13 @@ Deleted notes are purged from our systems within 24 hours. If you
 delete your account, every byte associated with it — notes, metadata,
 backups — is removed within 30 days.
 
+## Security incidents
+
+We will notify affected users of a confirmed data breach within 72
+hours of discovery, where legally required. Notifications will be
+sent to the email address on file and will describe the categories
+of data involved and the steps we are taking in response.
+
 ## AI features
 
 Nimbus AI offers optional summarization and rewriting of your notes.
