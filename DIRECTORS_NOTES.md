@@ -16,7 +16,7 @@ The core analysis engine in `src/analysis/` is shared between both surfaces. It 
 
 **Narrative interpretation (v0.7):** `src/analysis/narrative/` is a pure transformation layer over `DiffResult` that promotes raw heuristic findings into ranked **Issues** with forensic-report framing ("Requirement reversed on logging", "Rate limit constraint introduced", "Audit guarantee removed"). The layer doesn't touch the engine — it classifies → clusters → titles → ranks, citing every underlying finding. Default-on in `--html` and `--json`; `--no-narrative` opts out. Anti-hallucination contract: every Issue carries `supportingFindings[]` back-pointers; every title slot is filled from evidence verbatim or falls back to the raw summary.
 
-**Persistent judgment memory (v0.7.1):** `samediff audit` now preserves reviewer verdicts across reruns in a `verdicts.json` sidecar living next to `audit.md`. Step identity is `sha256(fromRef, toRef, filePath)` — stable across trail regeneration, rebase-sensitive (a new parent is a new step, which is correct). A separate findings fingerprint flags steps whose engine output has changed since the prior human judgment (`[ENGINE-CHANGED]` badge, re-review prompt) rather than silently rubber-stamping. The roundtrip is markdown-first: humans edit `**verdict**: <value>` slots in `audit.md`; rerun `samediff audit` harvests them into `verdicts.json`; subsequent renders carry prior verdicts inline with a `*(carried from YYYY-MM-DD)*` annotation. Orphaned verdicts (trail no longer contains the step) are retained in `verdicts.json#orphaned[]` and surfaced as a dedicated section in `audit.md` so a spec rewrite can't silently drop last quarter's FP judgments. observe → judge → preserve judgment, not observe → forget → repeat.
+**Persistent judgment memory (v0.7.2):** `samediff audit` preserves reviewer verdicts across reruns at two grains — step and per-finding — in a schema-v2 `verdicts.json` sidecar living next to `audit.md`. Identity is the foundation: step identity is `sha256(fromRef || toRef || filePath)`; per-finding identity is a fingerprint of the *semantic core only* (kind + normalized evidence), deliberately excluding engine-labelled metadata (triggers, reason tag, confidence) so "same meaning → same fingerprint" survives detector retuning. If the evidence itself shifts, the fingerprint shifts, the old finding is retained in `orphanedFindings` with its verdict preserved, and the new finding is marked `[NEW]`; the step gets a `[DRIFTED]` badge and prior step-level verdicts are carried forward with a `re-review recommended` flag rather than silently rubber-stamped. The roundtrip is markdown-first: reviewers edit `**verdict**`/`**note**`/`**finding-verdicts**` slots in `audit.md` (per-finding overrides keyed by `{f:<12-hex>}` display id); rerun `samediff audit` harvests, persists, and re-renders with `*(carried from YYYY-MM-DD)*` annotations. Orphaned transitions (stepKey no longer in trail) are retained in `verdicts.json#orphanedSteps` so a spec rewrite can't silently drop last quarter's FP judgments. v1 stores migrate transparently on first read. observe → judge → preserve judgment, not observe → forget → repeat.
 
 **Working surfaces:**
 - CLI: `./samediff left.md right.md` (auto-builds if stale)
@@ -73,11 +73,116 @@ Three example shapes, all driven by `examples/generate.sh`:
   picks up the worst-score `stat-num` class the same way it does for
   the other shapes.
 
-**Test counts:** 28 engine tests + 112 CLI integration tests + 24 PR-reviewer tests + 23 narrative tests + 11 multi-file tests + 13 source-diff tests + 11 macro-thesis tests + 18 history+scan+audit tests, all passing (240 total)
+**Test counts:** 28 engine tests + 112 CLI integration tests + 24 PR-reviewer tests + 23 narrative tests + 11 multi-file tests + 13 source-diff tests + 11 macro-thesis tests + 21 history+scan+audit tests, all passing (243 total)
 
 ## Devlog
 
-### 2026-04-18 — Claude Opus 4.7 — Persistent verdict memory + README identity reset
+### 2026-04-18 — Claude Opus 4.7 — Verdict memory v2: per-finding fingerprints + identity as foundation
+
+Same-day sharpening of the verdict-memory landing. The v1 design
+stored step-level verdicts and an aggregate findings fingerprint,
+which meant any engine retune that reshaped the finding set flagged
+the whole step as `[ENGINE-CHANGED]` even if the individual findings
+were unchanged — and didn't let a reviewer mark "this step is real
+signal, except finding #2 is a known FP." The crisper framing
+(identity is the foundation; same meaning → same fingerprint, not
+same line → same identity) demanded a per-finding grain.
+
+**What changed from v1:**
+
+- Schema bumped to "2". `entries[]` → `steps[]`, each with
+  `findings: FindingRecord[]` and `orphanedFindings: FindingRecord[]`.
+  Step-level aggregate `findingsFingerprint` removed — per-finding
+  fingerprints make it redundant.
+- Finding fingerprint is computed from the *semantic core only*:
+  kind + normalized evidence fields (trim + collapse ws +
+  lowercase). No triggers, no reason tag, no confidence label, no
+  line numbers. This is the "same meaning → same fingerprint"
+  contract: if the engine retunes `confidence: medium → high` on
+  a contradiction, the fingerprint is unchanged and the verdict
+  persists. If the engine reclassifies the underlying evidence
+  text, the fingerprint shifts and the old finding becomes
+  orphaned-within-step (verdict preserved, not transferred).
+- Status bumped from `persisted | engine-changed | new` to
+  `persisted | drifted | new`. `drifted` fires when any finding
+  is new or any prior finding is gone — a more honest signal
+  than the aggregate-fingerprint version, because it preserves
+  the per-finding verdicts that *didn't* change.
+- Reviewer UX expanded: `**finding-verdicts**` markdown block
+  under each step, with lines of the form
+  `` - `<12-hex id>` <verdict> — <optional note>``. The block is
+  re-rendered as a concrete list when any per-finding verdict is
+  recorded, so the next edit session starts from the last-known
+  state instead of a prompt. Unknown IDs are ignored silently;
+  this prevents a stale edit from poisoning the store.
+- Orphan surface split: `orphanedSteps[]` (stepKey not in live
+  trail) vs. per-step `orphanedFindings[]` (step persists but
+  finding disappeared). Both retain prior verdicts verbatim.
+
+**Identity decisions worth recording:**
+
+- Step key: `sha256(fromRef || "\n" || toRef || "\n" || filePath)`,
+  32 hex. Rebase-aware (a new parent = a new transition, correctly).
+  Unchanged from v1.
+- Finding fingerprint: `sha256(kind || "\0" || <sorted k=v ||\0>*)`,
+  32 hex stored, 12 hex displayed inline as `{f:<id>}`. 12 hex is
+  48 bits — comfortably collision-free within any single step (a
+  step with ≥10⁷ findings would be extraordinary). Matching is
+  always scoped per-step via stepKey, so collisions across steps
+  are impossible by construction.
+- Normalization: `trim() + replace(/\s+/g, " ") + toLowerCase()` on
+  every evidence string before feeding into the hash. Tolerant to
+  cosmetic whitespace/case churn; strict on semantic content.
+
+**Migration from v1.** `loadVerdictStore` detects the v1 shape
+(`version: "1"`, `entries: [...]`, `orphaned: [...]`) and upgrades
+in memory: each v1 entry's step-level verdict/note/setAt/engine
+version moves to `step.verdict`. `findings: []` starts empty — v1
+had no per-finding memory, so nothing is invented. Subsequent runs
+populate per-finding records as the engine fires. New tests cover
+the migration path end-to-end.
+
+**Tests: 240 → 243.** New / rewritten in
+`tools/history-scan.test.mjs` (9 total for audit v2):
+- v2 sidecar shape (steps + findings + orphanedSteps arrays)
+- step-level verdict harvest + persistence across reruns
+- per-finding verdict harvest via `finding-verdicts` block
+- `[NEW]` on first observation; absent on rerun
+- orphaned steps preserve prior step-level verdicts
+- `[DRIFTED]` fires when findings change within a persisted step,
+  and orphaned findings surface with their prior verdicts
+- finding fingerprints stable across trail regeneration
+- v1 → v2 migration is lossless for step verdicts
+- finding fingerprint is tolerant to ancillary engine-label changes
+  (verdict survives rerun)
+
+**Dogfood smoke** on `examples/08-policy-drift/policy.md` (7-step
+history): first run reports 7 new steps + 59 new findings. After
+simulated reviewer edits (one step-level `signal` + one
+finding-level `fp`), rerun reports 0 new / 7 persisted / 0 drifted
+and re-renders the `finding-verdicts` block as a concrete list with
+the recorded override. The roundtrip is airtight — every finding
+carries its fingerprint, every persisted verdict shows
+`*(carried from YYYY-MM-DD)*`, and the orphan logic fires
+correctly when injected ghost findings leave the engine's view.
+
+**Deferred (not built):**
+- `samediff audit --harvest`: parse audit.md → update verdicts.json
+  without re-rendering. Useful for CI pipelines that want to capture
+  reviewer output without re-running the engine. Current flow
+  handles the common case fine.
+- Verdict diffing between runs (beyond the badge-level signal in
+  `**state**`). The data is there (`setAt`, `engineVersionAtJudgment`,
+  `firstSeenAt`, `lastConfirmedAt`); rendering is future work.
+- Per-finding "changed but matchable" detection (primary vs. full
+  fingerprint split). Currently: strict fingerprint match or it's
+  a new finding. The tolerant normalization in the fingerprint
+  already covers most cosmetic drift; soft-matching adds complexity
+  that hasn't earned its way in yet.
+
+Trust infrastructure first. Scale second. The foundation is solid.
+
+### 2026-04-18 — Claude Opus 4.7 — Persistent verdict memory v1 (superseded by v2 same day) + README identity reset
 
 Two-part session. README overhaul first, then the foundation for
 persistent judgment in `samediff audit`.

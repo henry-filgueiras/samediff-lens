@@ -179,18 +179,68 @@ Built-in policies (always available, override-able): `adoption` (new drift only,
 
 ## Persistent judgment
 
-Running `samediff audit` used to generate `audit.md` with an inline `**verdict**` slot per step — and then forget everything the moment the trail was regenerated. That's amnesia, not governance.
+Running `samediff audit` used to generate `audit.md` with a `**verdict**` slot per step — and then forget everything the moment the trail was regenerated. That's amnesia, not governance.
 
-Now:
+Memory is an identity problem wearing a UX hat. Before persisting any verdict, the system has to answer *what counts as "the same thing"?* — and answer it at two grains.
 
-- **`verdicts.json`** lives alongside `audit.md` in the history output directory. It's a machine-readable sidecar with one entry per step, keyed by a stable hash of the transition (not by array index).
-- **Reruns preserve prior verdicts.** If a step's content is identical, its verdict carries forward. Each entry records when it was first seen, when it was last confirmed, and which engine version produced the findings underneath it.
-- **New steps are marked `[NEW]`** in the rendered `audit.md` so reviewers spend time on what's actually new.
-- **Removed / altered steps** are surfaced separately — a spec rewrite that would have silently deleted last quarter's FP judgments now shows them as orphaned, pending review.
-- **Engine evolution is visible.** If the detection engine retunes and a step's finding set changes, `verdicts.json` records the delta and flags the step as needing re-review rather than rubber-stamping the old verdict.
-- **Human review first, automation second.** Verdicts are written by humans (or LLMs under human supervision) directly into `audit.md`; `samediff audit --harvest` parses them back into `verdicts.json`. The data model is designed to diff cleanly in git.
+### Identity is the foundation
 
-This is the foundation for the next layer — trend dashboards, reviewer-assistance, engine-regression gates — but the foundation first. Trust infrastructure, then scale.
+**Step identity:** `stepKey = sha256(fromRef || toRef || filePath)`. Stable across trail regeneration. Rebase-aware — if a commit is rewritten with a new parent, the stepKey changes, which is correct: it's a different transition now.
+
+**Finding fingerprint:** `sha256` over the **semantic core only** — kind + normalized evidence (trim, collapse whitespace, case-fold). Engine-labelled metadata (`triggers`, `reason`, `confidence`) is deliberately excluded. This is the "same meaning → same fingerprint" contract:
+
+- Engine retunes a contradiction's confidence from `medium` to `high`? Fingerprint unchanged. Verdict persists.
+- Engine's triggers for a commitment-shift change from `["strengthens"]` to `["narrows","obligates"]`? Fingerprint unchanged. Verdict persists.
+- Underlying evidence text shifts? Fingerprint changes. The prior finding becomes orphaned-within-step with its verdict preserved; the new finding is marked `[NEW]`; the step is tagged `[DRIFTED]` and prior step-level verdicts are carried forward with a re-review prompt — not silently rubber-stamped.
+
+### The sidecar
+
+`verdicts.json` lives next to `audit.md`. Schema v2:
+
+```jsonc
+{
+  "version": "2",
+  "steps": [
+    {
+      "stepKey": "sha256:...", "fromRef": "...", "toRef": "...",
+      "verdict": { "value": "signal|fp|noise|unclear", "note": "...",
+                   "setAt": "...", "engineVersionAtJudgment": "..." } | null,
+      "findings": [
+        { "fingerprint": "sha256:...", "kind": "commitment-shift",
+          "verdict": { ... } | null, "firstSeenAt": "...", "lastConfirmedAt": "..." }
+      ],
+      "orphanedFindings": [ ... /* findings gone from this step, verdicts preserved */ ]
+    }
+  ],
+  "orphanedSteps": [ ... /* transitions no longer in trail, verdicts preserved */ ]
+}
+```
+
+v1 stores migrate transparently on first read.
+
+### The roundtrip
+
+Markdown is the canvas. Each finding line in `audit.md` carries a `{f:<12-hex>}` tag that identifies it durably across reruns. Reviewers edit two slots per step:
+
+```markdown
+**verdict**: signal
+**note**: real narrowing — confirmed with legal
+**finding-verdicts**:
+- `a1b2c3d4e5f6` fp — extractor artifact: mid-sentence fragment
+- `9abc12345def` noise
+```
+
+Rerun `samediff audit`. The CLI harvests edits from `audit.md`, persists them into `verdicts.json`, and re-renders with:
+
+- `[NEW]` on steps and findings observed for the first time
+- `[DRIFTED]` on steps whose findings changed since last review
+- `*(carried from YYYY-MM-DD)*` annotations inline on preserved verdicts
+- A populated `finding-verdicts` list (reviewers edit from last-known state, not from a prompt)
+- An **Orphaned verdicts** section at the bottom for transitions or findings no longer live
+
+Human review first, automation second. The data model diffs cleanly in git — every verdict, every fingerprint, every status change is a visible edit.
+
+This is the foundation for the next layer — trend dashboards, reviewer-assistance, engine-regression gates. But the foundation first. Trust, then scale.
 
 ## Proof objects
 
