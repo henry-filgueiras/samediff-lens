@@ -17,6 +17,7 @@ surfaces.
 | 03 | API Contract | Medium | Scope narrowing, new constraints, contradictions |
 | 04 | Prompt Policy | Medium-Advanced | Behavioral contract tightening, data policy reversal |
 | 05 | Hydra Doc Drift | Advanced | All detectors — architecture rewrite across sections |
+| 08 | Policy Drift (git history) | Advanced | Per-commit drift trajectory — `samediff history` over 8 versions |
 
 ## What each example demonstrates
 
@@ -37,3 +38,8 @@ Shows why semantic diff matters for prompt engineering.
 **05-hydra-doc-drift** — A full design doc revision: central registry → gossip
 protocol, narrowed retry policy, rewritten runbook, immutable state → mutable
 CRDT. Exercises all detection passes simultaneously.
+
+**08-policy-drift** — A fictional SaaS privacy policy evolving across 8 real
+git commits. Unlike the pair examples, this one is driven by `samediff
+history` and publishes the full trajectory report (drift chart + per-commit
+timeline). Each commit is locally plausible; the arc is not.

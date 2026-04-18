@@ -15,13 +15,40 @@ done < <(find "${EXAMPLES_DIR}" -mindepth 1 -maxdepth 1 -type d -print0 | sort -
 
 set -x
 for d in "${EXAMPLE_DIRS[@]}"; do
-    # Multi-file examples have a v1/ + v2/ pair instead of left.md/right.md.
-    # Detect that shape and route to `samediff dir` accordingly so the same
-    # generate.sh can drive both kinds of demo.
+    # Three supported example shapes:
+    #   - pair:     left.md + right.md  (single-file pair, `samediff check`)
+    #   - dir-pair: v1/ + v2/            (multi-file pair, `samediff dir`)
+    #   - history:  one tracked .md at the dir root with git history,
+    #               driven by `samediff history`. Marker = absence of the
+    #               other two shapes + a single non-README .md at the
+    #               directory root.
     if [[ -d "$d/v1" && -d "$d/v2" ]]; then
         "${SAMEDIFF_PATH}" dir "$d/v1" "$d/v2" --html -o "$d/findings.html"
-    else
+    elif [[ -f "$d/left.md" && -f "$d/right.md" ]]; then
         "${SAMEDIFF_PATH}" "$d/left.md" "$d/right.md" --html --out "$d/findings.html"
+    else
+        # history mode: find the single non-README markdown at the root.
+        doc=""
+        while IFS= read -r -d '' f; do
+            case "$(basename "$f")" in
+                README.md|readme.md) continue ;;
+            esac
+            doc="$f"
+            break
+        done < <(find "$d" -mindepth 1 -maxdepth 1 -type f -name '*.md' -print0 | sort -z)
+        if [[ -z "$doc" ]]; then
+            echo "skip: $d (no recognizable example shape)" >&2
+            continue
+        fi
+        # `samediff history` requires running inside the git working
+        # tree, and wants the path relative to the repo root.
+        repo_root="$(git -C "$d" rev-parse --show-toplevel)"
+        rel_doc="${doc#${repo_root}/}"
+        (cd "$repo_root" && "${SAMEDIFF_PATH}" history "$rel_doc" -o "$d" --no-empty)
+        # The splash page scrapes findings.html per example; point it at
+        # the history index. cp (not symlink) so the Pages static upload
+        # step treats it as a first-class file.
+        cp "$d/index.html" "$d/findings.html"
     fi
 done
 set +x
