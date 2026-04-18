@@ -21,9 +21,12 @@ We do not collect advertising identifiers.
 
 ## How your notes are stored
 
-All notes are end-to-end encrypted at rest and in transit. No Nimbus
-employee can read the contents of your notes, and we cannot recover
-them if you lose your account credentials.
+Notes are encrypted in our primary database using AES-256. Data
+moving between your client and our servers is encrypted in transit
+using TLS 1.2 or later. Database backups are stored in encrypted
+form by our cloud provider. System logs may retain note titles and
+other metadata in plaintext for up to 14 days to support debugging
+and abuse investigations.
 
 ## Sharing
 
