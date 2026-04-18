@@ -6,16 +6,18 @@ to every account, on every plan.
 
 ## What we collect
 
-We collect only the minimum data required to provide the service:
+We collect the data required to provide the service and understand
+how it is used:
 
 - **Account information** — your email address and display name.
 - **Your notes** — the content you author, and the folders you organize
   them into.
 - **Device information** — your browser or client version, used solely
   to ship bug fixes.
+- **Product usage metrics** — anonymized events showing which features
+  are opened, to help us prioritize what to build.
 
-We do not collect analytics, behavioural telemetry, or advertising
-identifiers.
+We do not collect advertising identifiers.
 
 ## How your notes are stored
 
@@ -25,8 +27,9 @@ them if you lose your account credentials.
 
 ## Sharing
 
-We will never sell your data. We do not share your data with third
-parties for any purpose.
+We will never sell your data. We share anonymized product usage
+metrics with our analytics providers (Mixpanel and PostHog) to
+understand feature adoption.
 
 ## Retention
 
