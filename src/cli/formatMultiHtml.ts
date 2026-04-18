@@ -74,6 +74,12 @@ export function formatMultiHtmlReport(report: MultiFileReport): string {
         fileA: f.path,
         fileB: f.path,
         narrative: true,
+        // Pass the original source texts so each leaf iframe shows its
+        // own source-diff section. The top-level multi-file aggregate
+        // page itself does NOT show a diff — it's not a single-file
+        // comparison.
+        leftText: f.leftText,
+        rightText: f.rightText,
       },
     );
     // We embed the inner HTML's <body> contents only by extracting the

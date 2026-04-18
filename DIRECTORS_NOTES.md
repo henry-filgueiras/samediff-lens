@@ -62,9 +62,64 @@ The core analysis engine in `src/analysis/` is shared between both surfaces. It 
 **Example spectrum (examples/):**
 01-modal-shift → 02-todo-drift → 03-api-contract → 04-prompt-policy → 05-hydra-doc-drift
 
-**Test counts:** 28 engine tests + 100 CLI integration tests + 24 PR-reviewer tests + 19 narrative tests + 11 multi-file tests, all passing
+**Test counts:** 28 engine tests + 100 CLI integration tests + 24 PR-reviewer tests + 19 narrative tests + 11 multi-file tests + 13 source-diff tests, all passing (195 total)
 
 ## Devlog
+
+### 2026-04-17 — Claude Opus 4.7 — Embedded source diff with finding cross-tags
+
+Reading "Commitment weakened on logging" without seeing the actual line
+churn forced the reader to context-switch to a separate diff tool. The
+narrative now ships the diff alongside it.
+
+**Algorithm.** New pure-TS `src/cli/sourceDiff.ts` — Hunt–McIlroy line
+diff via LCS dynamic programming, then a hunk grouper that keeps
+3 lines of context around each change and collapses long unchanged
+stretches. `Int32Array` for the LCS table to keep the memory tight.
+Caps at 4000 lines per side; over the cap returns null and the
+renderer skips the section gracefully.
+
+**HTML embedding.** `formatHtml.ts` gained a `leftText` / `rightText`
+option pair; when both are provided, a "Source diff" `<details>`
+section renders between the narrative and the raw category cards.
+Default open if ≤80 changed lines, collapsed otherwise. Per-row layout
+mirrors a unified diff: before-line + after-line gutters, +/- marker,
+text. Skipped entirely for identical files (no-op section).
+
+**Cross-tagging — the killer detail.** Each diff line whose 1-based
+line number falls inside any finding's anchor range gets a
+`has-finding` highlight (yellow inset border on the gutter) plus a
+small `diff-finding-tag` chip naming the kind of finding ("commitment
+shift", "contradiction", "added concept", "removed concept", "rename",
+"task change"). Built by `collectAnchorMap` which walks every
+evidence type and indexes anchors by side+line. Reader can scroll
+through the diff and immediately see *which lines triggered which
+accusations* — closing the loop between the narrative layer and the
+underlying source.
+
+**Multi-file plumbing.** `FileNarrative` now carries `leftText` /
+`rightText`; `formatMultiHtml` passes them through to the per-leaf
+`formatHtmlReport` call so each file iframe renders its own diff. The
+top-level multi-file aggregate page does NOT render a diff — it's
+not a single-file comparison, and the aggregate already cross-links
+to per-file detail panels. JSON output of `samediff dir --json`
+strips `leftText` / `rightText` from the per-file entries before
+serialisation (large, only useful to the HTML renderer; JSON
+consumers can re-read from `meta.leftRoot` + path).
+
+**Tests** — 13 in `tools/source-diff.test.mjs`:
+- LCS correctness: identity, pure insertion, pure deletion,
+  modification, line-number tracking through interleaved changes.
+- Hunk grouping: long unchanged stretches collapse, distant changes
+  produce separate hunks.
+- Memory cap: 5000-line input returns null instead of OOMing.
+- HTML integration: diff section appears, hunks render, +/- rows
+  exist, identical files produce no diff section.
+- Cross-tagging: finding tags appear on changed lines that overlap
+  finding anchors.
+- Multi-file: leaf iframes embed diffs, top-level page does NOT.
+- JSON strip: `leftText` / `rightText` are absent from `--json`
+  output.
 
 ### 2026-04-17 — Claude Opus 4.7 — Pages publishes the example reports
 

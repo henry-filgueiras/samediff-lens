@@ -4,6 +4,7 @@ import { describeContradiction, NO_PRIOR_LINE_TEXT } from "../analysis/heuristic
 import { buildNarrative } from "../analysis/narrative";
 import type { Issue, NarrativeReport } from "../analysis/narrative";
 import { buildDiffResult } from "./resultModel";
+import { diffLinesWithHunks, type DiffRow, type Hunk } from "./sourceDiff";
 
 type HtmlOptions = {
   fileA?: string;
@@ -11,6 +12,14 @@ type HtmlOptions = {
   generatedAt?: string;
   /** Render narrative Top Issues section above category cards. Default true. */
   narrative?: boolean;
+  /**
+   * Original source text of the before / after files. When both are
+   * provided, the report includes a "Source diff" section showing the
+   * line-level diff with finding anchors cross-tagged. Skipped if
+   * either is absent.
+   */
+  leftText?: string;
+  rightText?: string;
 };
 
 function esc(text: string): string {
@@ -357,6 +366,71 @@ export function formatHtmlReport(
   }
   .raw-details-wrapper[open] > summary::before { content: "\u25BE  "; }
 
+  /* Source diff */
+  .source-diff {
+    margin: 1.25rem 0;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; overflow: hidden;
+  }
+  .source-diff > summary {
+    cursor: pointer; user-select: none; padding: 0.7rem 1rem;
+    list-style: none; display: flex; gap: 0.75rem; align-items: center;
+    color: var(--text); font-weight: 600; font-size: 0.9rem;
+  }
+  .source-diff > summary::-webkit-details-marker { display: none; }
+  .source-diff > summary::before {
+    content: "\u25B8"; color: var(--text2); margin-right: 0.15rem;
+  }
+  .source-diff[open] > summary::before { content: "\u25BE"; }
+  .source-diff .diff-meta {
+    color: var(--text2); font-weight: 400; font-size: 0.78rem;
+    margin-left: auto;
+  }
+  .source-diff .diff-meta .diff-add { color: var(--green); }
+  .source-diff .diff-meta .diff-rem { color: var(--red); }
+  .diff-hunk {
+    border-top: 1px solid var(--border);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.78rem; line-height: 1.5;
+  }
+  .diff-hunk-header {
+    background: var(--surface2); color: var(--text2);
+    padding: 0.2rem 0.6rem; font-size: 0.72rem;
+  }
+  .diff-row {
+    display: grid; grid-template-columns: 3rem 3rem 1.1rem 1fr;
+    align-items: baseline;
+    padding: 0 0.6rem; min-height: 1.5em;
+  }
+  .diff-row .ln {
+    color: var(--text2); text-align: right; padding-right: 0.4rem;
+    font-size: 0.7rem; user-select: none;
+  }
+  .diff-row .gutter {
+    color: var(--text2); text-align: center; user-select: none;
+  }
+  .diff-row .text { white-space: pre-wrap; word-break: break-word; }
+  .diff-row.add { background: rgba(63,185,80,0.10); }
+  .diff-row.add .gutter, .diff-row.add .text { color: var(--green); }
+  .diff-row.add .gutter::before { content: "+"; }
+  .diff-row.remove { background: rgba(248,81,73,0.10); }
+  .diff-row.remove .gutter, .diff-row.remove .text { color: var(--red); }
+  .diff-row.remove .gutter::before { content: "-"; }
+  .diff-row.has-finding {
+    box-shadow: inset 3px 0 0 var(--yellow);
+  }
+  .diff-row.has-finding .ln {
+    color: var(--yellow); font-weight: 600;
+  }
+  .diff-finding-tag {
+    display: inline-block; margin-left: 0.4rem;
+    font-size: 0.65rem; padding: 0 0.35rem; border-radius: 3px;
+    background: var(--yellow-bg); color: var(--yellow);
+    text-transform: uppercase; letter-spacing: 0.04em;
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    vertical-align: middle;
+  }
+
   .summary {
     margin-top: 1.5rem; padding: 1rem; background: var(--surface);
     border: 1px solid var(--border); border-radius: 8px;
@@ -399,6 +473,8 @@ export function formatHtmlReport(
   </div>
 
   ${renderNarrative(narrative)}
+
+  ${renderSourceDiff(options, result)}
 
   ${sections.length > 0 ? `<details class="raw-details-wrapper"${narrative && narrative.issues.length > 0 ? "" : " open"}>
     <summary>Supporting details &middot; raw findings by category</summary>
@@ -551,4 +627,175 @@ function renderQuietItem(issue: Issue): string {
       <div class="quiet-item">
         <strong style="color:var(--text);">${esc(issue.title)}</strong>
       </div>`;
+}
+
+/**
+ * Render the embedded source diff section. Skipped if either text is
+ * missing, if the files are too large for the LCS table, or if there
+ * are zero changed lines (identical files — the diff section would
+ * be a wall of context with nothing to look at).
+ *
+ * Each diff line whose line number falls inside any finding's anchor
+ * range gets a `has-finding` highlight and a small tag listing which
+ * finding kinds it touches. That's the cross-reference between
+ * "what the report says" and "where in the source it says it".
+ */
+function renderSourceDiff(opts: HtmlOptions, result: AnalysisResult): string {
+  const left = opts.leftText;
+  const right = opts.rightText;
+  if (left === undefined || right === undefined) return "";
+
+  const diff = diffLinesWithHunks(left, right);
+  if (!diff || diff.changedLines === 0) return "";
+
+  const beforeFindings = collectAnchorMap(result, "before");
+  const afterFindings = collectAnchorMap(result, "after");
+
+  // Default: open if compact (≤80 changed lines), collapsed otherwise.
+  const openByDefault = diff.changedLines <= 80;
+
+  const adds = diff.hunks.reduce(
+    (acc, h) => acc + h.rows.filter((r) => r.op === "add").length,
+    0,
+  );
+  const rems = diff.hunks.reduce(
+    (acc, h) => acc + h.rows.filter((r) => r.op === "remove").length,
+    0,
+  );
+
+  const hunksHtml = diff.hunks
+    .map((h) => renderHunk(h, beforeFindings, afterFindings))
+    .join("");
+
+  return `
+  <details class="source-diff"${openByDefault ? " open" : ""}>
+    <summary>
+      Source diff
+      <span class="diff-meta">
+        <span class="diff-add">+${adds}</span>
+        <span class="diff-rem">-${rems}</span>
+        \u00b7 ${diff.hunks.length} hunk${diff.hunks.length === 1 ? "" : "s"}
+      </span>
+    </summary>
+    ${hunksHtml}
+  </details>`;
+}
+
+function renderHunk(
+  hunk: Hunk,
+  beforeFindings: Map<number, Set<string>>,
+  afterFindings: Map<number, Set<string>>,
+): string {
+  const header = `@@ -${hunk.beforeStart},${hunk.beforeLength} +${hunk.afterStart},${hunk.afterLength} @@`;
+  const rows = hunk.rows.map((r) => renderDiffRow(r, beforeFindings, afterFindings)).join("");
+  return `
+    <div class="diff-hunk">
+      <div class="diff-hunk-header">${esc(header)}</div>
+      ${rows}
+    </div>`;
+}
+
+function renderDiffRow(
+  row: DiffRow,
+  beforeFindings: Map<number, Set<string>>,
+  afterFindings: Map<number, Set<string>>,
+): string {
+  const cls =
+    row.op === "add" ? "diff-row add"
+    : row.op === "remove" ? "diff-row remove"
+    : "diff-row equal";
+
+  const findingTags: string[] = [];
+  if (row.beforeLine !== undefined) {
+    const kinds = beforeFindings.get(row.beforeLine);
+    if (kinds) for (const k of kinds) findingTags.push(k);
+  }
+  if (row.afterLine !== undefined) {
+    const kinds = afterFindings.get(row.afterLine);
+    if (kinds) for (const k of kinds) findingTags.push(k);
+  }
+  const dedupedTags = Array.from(new Set(findingTags));
+  const hasFindingClass = dedupedTags.length > 0 ? " has-finding" : "";
+
+  const tagsHtml = dedupedTags.length > 0
+    ? dedupedTags.slice(0, 3).map((t) => `<span class="diff-finding-tag">${esc(t)}</span>`).join("")
+    : "";
+
+  return `
+      <div class="${cls}${hasFindingClass}">
+        <span class="ln">${row.beforeLine ?? ""}</span>
+        <span class="ln">${row.afterLine ?? ""}</span>
+        <span class="gutter"></span>
+        <span class="text">${esc(row.text || " ")}${tagsHtml}</span>
+      </div>`;
+}
+
+/**
+ * Build a map from line number to the set of finding-kind labels that
+ * have an anchor on that line on the given side. The label is a short
+ * human-readable category ("commitment shift", "contradiction",
+ * "added concept", etc.) — used to tag the diff line.
+ */
+function collectAnchorMap(
+  result: AnalysisResult,
+  side: "before" | "after",
+): Map<number, Set<string>> {
+  const m = new Map<number, Set<string>>();
+
+  const tag = (line: number | undefined, label: string) => {
+    if (line === undefined) return;
+    const set = m.get(line) ?? new Set<string>();
+    set.add(label);
+    m.set(line, set);
+  };
+
+  for (const ev of result.changedCommitmentsEvidence) {
+    for (const a of ev.provenance?.anchors ?? []) {
+      if (a.side !== side) continue;
+      for (let l = a.startLine ?? 0; l <= (a.endLine ?? a.startLine ?? 0); l++) {
+        if (l > 0) tag(l, "commitment shift");
+      }
+    }
+  }
+  for (const ev of result.possibleContradictionsEvidence) {
+    for (const a of ev.provenance?.anchors ?? []) {
+      if (a.side !== side) continue;
+      for (let l = a.startLine ?? 0; l <= (a.endLine ?? a.startLine ?? 0); l++) {
+        if (l > 0) tag(l, "contradiction");
+      }
+    }
+  }
+  for (const ev of result.addedConceptsEvidence) {
+    for (const a of ev.provenance?.anchors ?? []) {
+      if (a.side !== side) continue;
+      for (let l = a.startLine ?? 0; l <= (a.endLine ?? a.startLine ?? 0); l++) {
+        if (l > 0) tag(l, "added concept");
+      }
+    }
+  }
+  for (const ev of result.removedConceptsEvidence) {
+    for (const a of ev.provenance?.anchors ?? []) {
+      if (a.side !== side) continue;
+      for (let l = a.startLine ?? 0; l <= (a.endLine ?? a.startLine ?? 0); l++) {
+        if (l > 0) tag(l, "removed concept");
+      }
+    }
+  }
+  for (const r of result.renamedIdeas) {
+    for (const a of r.provenance?.anchors ?? []) {
+      if (a.side !== side) continue;
+      for (let l = a.startLine ?? 0; l <= (a.endLine ?? a.startLine ?? 0); l++) {
+        if (l > 0) tag(l, "rename");
+      }
+    }
+  }
+  for (const c of result.actionItemsStatusChanges ?? []) {
+    for (const a of c.provenance?.anchors ?? []) {
+      if (a.side !== side) continue;
+      for (let l = a.startLine ?? 0; l <= (a.endLine ?? a.startLine ?? 0); l++) {
+        if (l > 0) tag(l, "task change");
+      }
+    }
+  }
+  return m;
 }

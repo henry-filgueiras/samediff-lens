@@ -439,6 +439,8 @@ function main() {
         fileB: input.labelB,
         generatedAt: new Date().toISOString(),
         narrative: !noNarrative,
+        leftText: textA,
+        rightText: textB,
       });
       emit(html);
       return finish(result, score);
@@ -699,7 +701,15 @@ function runDirCommand(args: string[], cwd: string): void {
 
   let content: string;
   if (format === "json") {
-    content = JSON.stringify(report, null, 2) + "\n";
+    // Strip the inlined source texts from the JSON shape — they're large
+    // and only useful to the HTML renderer (for the embedded source diff).
+    // Machine consumers can re-read the originals from `meta.leftRoot` /
+    // `meta.rightRoot` + per-file path.
+    const jsonReport = {
+      ...report,
+      files: report.files.map(({ leftText: _l, rightText: _r, ...rest }) => rest),
+    };
+    content = JSON.stringify(jsonReport, null, 2) + "\n";
   } else if (format === "html") {
     content = formatMultiHtmlReport(report);
   } else {

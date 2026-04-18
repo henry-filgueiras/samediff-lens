@@ -43,6 +43,14 @@ export type FileNarrative = {
   diff: DiffResult;
   /** Convenience: same narrative as diff.narrative, lifted out. */
   narrative: NarrativeReport;
+  /**
+   * Original source texts. Threaded through so the per-file HTML
+   * renderer can embed a source diff. Omitted from JSON output (large,
+   * not useful in machine-readable form) — see the JSON serialiser
+   * call site for the strip step.
+   */
+  leftText?: string;
+  rightText?: string;
 };
 
 export type FileNotice = {
@@ -133,7 +141,7 @@ export function runMultiFile(opts: RunMultiFileOptions): MultiFileReport {
     // Attach narrative onto diff for downstream renderers that read from
     // DiffResult; keep it lifted-out too for ergonomic access.
     (diff as unknown as { narrative: NarrativeReport }).narrative = narrative;
-    files.push({ path: toPosix(rel), diff, narrative });
+    files.push({ path: toPosix(rel), diff, narrative, leftText: aText, rightText: bText });
   }
 
   const notices: FileNotice[] = [
